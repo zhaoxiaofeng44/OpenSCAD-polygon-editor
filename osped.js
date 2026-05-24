@@ -1,493 +1,897 @@
-var local = {};
+(function () {
+  'use strict';
 
-$().ready(function () {
-	local.gridSize = 8;
-	local.subGridSize = 8;
-	local.paths = new Array();
-	local.oldExportStr = "";
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
 
-	local.currentPath = 0;
-	local.drag = -1;
-	local.selectedIdx = -1;
+  const state = {
+    gridSize: 8,
+    subGridSize: 8,
+    zoom: 1,
+    snap: true,
+    paths: [],
+    currentPath: 0,
+    drag: -1,
+    dragType: 0,
+    selectedIdx: -1,
+    oldExportStr: '',
+    history: [],
+    historyIndex: -1,
+    historyLimit: 100,
+    suppressExport: false,
+  };
 
-	local.drawWidth = $("#drawAreaSource").width();
-	local.drawWidth -= local.drawWidth % (local.gridSize * local.subGridSize * 2);
-	local.drawHeight = $(window).height() - $("#drawAreaSource").offset().top * 3;
-	local.drawHeight -= local.drawHeight % (local.gridSize * local.subGridSize * 2);
+  let drawWidth, drawHeight, centerX, centerY;
+  let drawArea, gridMinor, gridMajor, axes;
+  let tools = {};
 
-	local.centerX = local.drawWidth / 2;
-	local.centerY = local.drawHeight / 2;
+  const changeListeners = [];
+  window.OspedAPI = {
+    getPaths: () =>
+      state.paths.map((p) => ({
+        points: p.points.map((pt) => ({
+          x: pt.x, y: pt.y, type: pt.type,
+          prevCP: { ...pt.prevCP }, nextCP: { ...pt.nextCP },
+        })),
+        prefix: p.prefix,
+        postfix: p.postfix,
+      })),
+    getCode: () => {
+      const ta = document.querySelector('#exportArea');
+      return ta ? ta.value : '';
+    },
+    appendCode: (snippet) => {
+      const ta = document.querySelector('#exportArea');
+      if (!ta) return;
+      const sep = ta.value && !ta.value.endsWith('\n') ? '\n' : '';
+      ta.value = ta.value + sep + snippet + (snippet.endsWith('\n') ? '' : '\n');
+      ta.dispatchEvent(new Event('input'));
+    },
+    onChange: (fn) => { changeListeners.push(fn); },
+    forceRefresh: () => emitPathsChanged(),
+    resize2D: () => handleResize(),
+  };
+  function emitPathsChanged() {
+    for (const fn of changeListeners) {
+      try { fn(); } catch (e) { console.error(e); }
+    }
+  }
 
-	local.drawArea = Raphael("drawAreaSource", local.drawWidth+1, local.drawHeight+1);
-	$("#wrapper").css("float", "left");
-	
-	var str = "";
-	for(x=0;x<local.drawWidth+1;x+=local.gridSize)
-		str += "M"+(x+0.5)+",0L"+(x+0.5)+","+(local.drawHeight+1);
-	for(x=0;x<local.drawHeight+1;x+=local.gridSize)
-		str += "M0,"+(x+0.5)+"L"+(local.drawWidth+1)+","+(x+0.5);
-	local.grid = local.drawArea.path(str).attr("stroke", "#C0C0ff");
-	var str = "";
-	for(x=0;x<local.drawWidth+1;x+=local.gridSize*local.subGridSize)
-		str += "M"+(x+0.5)+",0L"+(x+0.5)+","+(local.drawHeight+1);
-	for(x=0;x<local.drawHeight+1;x+=local.gridSize*local.subGridSize)
-		str += "M0,"+(x+0.5)+"L"+(local.drawWidth+1)+","+(x+0.5);
-	local.grid = local.drawArea.path(str).attr("stroke", "#A0A0ff");
-	local.axes = local.drawArea.path("M0,"+(local.centerY+0.5)+"L"+(local.drawWidth+1)+","+(local.centerY+0.5)+"M"+(local.centerX+0.5)+",0L"+(local.centerX+0.5)+","+(local.drawWidth+1));
-	
-	local.editTool = Raphael("editToolSource", 24, 24);
-	local.editTool.path("M8,3L8,20L12,17L14,23L18,20L15,15L18,13Z").attr("fill", "#E0E0E0");
-	$("#editToolSource").click(function() { setSelectedTool(local.editTool); });
-	local.addTool = Raphael("addToolSource", 24, 24);
-	local.addTool.path("M10,2L14,2L14,10L22,10L22,14L14,14L14,22L10,22L10,14L2,14L2,10L10,10Z").attr("fill", "#80E080");
-	$("#addToolSource").click(function() { setSelectedTool(local.addTool); });
-	local.remTool = Raphael("remToolSource", 24, 24);
-	local.remTool.path("M22,10L22,14L2,14L2,10Z").attr("fill", "#E08080");
-	$("#remToolSource").click(function() { setSelectedTool(local.remTool); });
-	local.imgTool = Raphael("imgToolSource", 24, 24);
-	local.imgTool.path("M3,21L21,21L21,4L3,4Z");
-	local.imgTool.path("M5,6L5,12L11,12L11,6Z").attr("fill", "#F08080");
-	local.imgTool.circle(12,13,4).attr("fill", "#80F080");;
-	local.imgTool.path("M19,19L11,19L15,13Z").attr("fill", "#8080F0");
-	$("#imgToolSource").click(function() { setSelectedTool(local.imgTool); });
-	
-	local.editToolCorner = Raphael("editToolCorner", 24, 24);
-	local.editToolCorner.path("M3,14L18,18L14,3");
-	local.editToolCorner.rect(15,15,6,6);
-	local.editToolSmooth = Raphael("editToolSmooth", 24, 24);
-	local.editToolSmooth.path("M1,12C16,22 22,16 12,1");
-	local.editToolSmooth.rect(13,13,6,6);
-	local.editToolSmooth.path("M21,11L11,21");
-	local.editToolSmooth.rect(8,18,6,6);
-	local.editToolSmooth.rect(18,8,6,6);
-	
-	setSelectedTool(local.editTool);
-	
-	$("#editToolCorner").click(function () {
-		if (local.selectedIdx < 0) return;
-		local.paths[local.currentPath].points[local.selectedIdx].type = 0;
-		local.paths[local.currentPath].points[local.selectedIdx].prevCP = {x: 0, y: 0};
-		local.paths[local.currentPath].points[local.selectedIdx].nextCP = {x: 0, y: 0};
-		updatePath(local.paths[local.currentPath]);
-		showSelectedCP();
-	});
-	$("#editToolSmooth").click(function () {
-		if (local.selectedIdx < 0) return;
-		local.paths[local.currentPath].points[local.selectedIdx].type = 1;
-		local.paths[local.currentPath].points[local.selectedIdx].prevCP = {x:-2, y:-2};
-		local.paths[local.currentPath].points[local.selectedIdx].nextCP = {x: 2, y: 2};
-		updatePath(local.paths[local.currentPath]);
-		showSelectedCP();
-	});
+  document.addEventListener('DOMContentLoaded', init);
 
-	$("#pathListbox").prop("selectedIndex", 0);
-	$("#pathListbox").change(function() {
-		if (local.paths[local.currentPath] != undefined)
-		{
-			for(var i=0; i<local.paths[local.currentPath].points.length; i++)
-			{
-				if (local.paths[local.currentPath].points[i].box != undefined)
-					local.paths[local.currentPath].points[i].box.remove();
-				local.paths[local.currentPath].points[i].box = undefined;
-			}
-			local.paths[local.currentPath].path.attr("stroke-width", 2);
-		}
-		local.currentPath = $("#pathListbox").prop("selectedIndex");
-		local.selectedIdx = -1;
-		if (local.paths[local.currentPath] != undefined)
-		{
-			for(var i=0; i<local.paths[local.currentPath].points.length; i++)
-			{
-				if (local.paths[local.currentPath].points[i].box != undefined)
-					local.paths[local.currentPath].points[i].box.remove();
-				local.paths[local.currentPath].points[i].box = local.drawArea.rect(toX(local.paths[local.currentPath].points[i].x) - local.gridSize / 2, toY(local.paths[local.currentPath].points[i].y) - local.gridSize / 2, local.gridSize, local.gridSize);
-			}
-			local.paths[local.currentPath].path.attr("stroke-width", 3);
-		}
-	});
-	$("#exportArea").keyup(function() {
-		var str = $("#exportArea").val();
-		if (str == local.oldExportStr) return;
-		
-		local.oldExportStr = str;
-		
-		for(var i=0; i<local.paths.length; i++)
-		{
-			for(var j=0; j<local.paths[i].points.length; j++)
-			{
-				if (local.paths[i].points[j].box != undefined)
-					local.paths[i].points[j].box.remove();
-			}
-			local.paths[i].path.remove();
-		}
-		local.paths = new Array();
-		local.selectedIdx = -1;
-		optionStr = "";
-		
-		var startIdx = str.indexOf("[[");
-		var p = 0;
-		var prevEnd = 0;
-		while (startIdx > -1)
-		{
-			var endIdx = str.indexOf("]]", startIdx);
-			if (endIdx > -1)
-			{
-				local.paths[p] = {points: new Array(), prefix: str.substr(prevEnd, startIdx - prevEnd), postfix: ""};
-				prevEnd = endIdx + 2;
-				var polyString = str.substr(startIdx + 2, endIdx - startIdx - 2).split("],[");
-				for(var i=0;i<polyString.length;i++)
-				{
-					var n = polyString[i].split(",");
-					var x = parseInt(n[0]);
-					var y = parseInt(n[1]);
-					local.paths[p].points.push({x: x, y: y, type: 0, nextCP: {x: 0, y: 0}, prevCP: {x: 0, y: 0}});
-					if (polyString[i].indexOf("/*") > 0)
-					{
-						var point = local.paths[p].points[local.paths[p].points.length - 1];
-						var extra = polyString[i].substr(polyString[i].indexOf("/*") + 2);
-						extra = extra.substr(0, extra.length - 2);
-						n = extra.split(":");
-						point.type = parseInt(n[0]);
-						n = n[1].split(",");
-						point.prevCP = {x: parseInt(n[0]), y: parseInt(n[1])};
-						point.nextCP = {x: parseInt(n[2]), y: parseInt(n[3])};
-					}
-				}
-				local.paths[p].path = local.drawArea.path("").attr("stroke-width", 2);
-				updatePath(local.paths[p]);
-				p++;
-				optionStr += "<option>Path:" + p;
-			}
-			startIdx = str.indexOf("[[", startIdx + 1);
-		}
-		if (p > 0)
-			local.paths[p-1].postfix = str.substr(prevEnd);
-		
-		optionStr += "<option>[New]";
-		$("#pathListbox").html(optionStr);
-		$("#pathListbox").prop("selectedIndex", 0);
-		local.currentPath = 0;
-		$("#pathListbox").change();
-	});
-	
-	//Functionality for loading an image behind the grid to trace over.
-	$("#traceImageURL").keyup(function() {
-		$("#traceImage").attr("src", $("#traceImageURL").val());
-	});
-	$("#traceImageScale").keyup(function () {
-		$("#traceImage").css("width", "");
-		$("#traceImage").css("width", $("#traceImage").width() * parseInt($("#traceImageScale").val()) / 100);
-		$("#traceImage").css("left", local.centerX - $("#traceImage").width() / 2 + $("#drawAreaSource").offset().left);
-		$("#traceImage").css("top", local.centerY - $("#traceImage").height() / 2 + $("#drawAreaSource").offset().top);
-	});
-	$("#traceImage").load(function () {
-		$("#traceImage").css("width", "");
-		$("#traceImage").css("width", $("#traceImage").width() * parseInt($("#traceImageScale").val()) / 100);
-		$("#traceImage").css("left", local.centerX - $("#traceImage").width() / 2 + $("#drawAreaSource").offset().left);
-		$("#traceImage").css("top", local.centerY - $("#traceImage").height() / 2 + $("#drawAreaSource").offset().top);
-	});
-	
-	//Test if we have the FileReader class, which can read files from your local disk (by using the file upload input field)
-	if (typeof(FileReader) != "function")
-	{
-		$("#traceImageFileSpan").css("display", "none");
-	}else{
-		local.imageFilter = /^(image\/bmp|image\/cis-cod|image\/gif|image\/ief|image\/jpeg|image\/jpeg|image\/jpeg|image\/pipeg|image\/png|image\/svg\+xml|image\/tiff|image\/x-cmu-raster|image\/x-cmx|image\/x-icon|image\/x-portable-anymap|image\/x-portable-bitmap|image\/x-portable-graymap|image\/x-portable-pixmap|image\/x-rgb|image\/x-xbitmap|image\/x-xpixmap|image\/x-xwindowdump)$/i;
-		local.fileReader = new FileReader();
-		$("#traceImageFile").change(function() {
-			var files = $("#traceImageFile").prop("files");
-			if (files.length === 0) { return; }  
-			if (!local.imageFilter.test(files[0].type))
-			{
-				alert("You must select a valid image file!");
-				return;
-			}
-			local.fileReader.readAsDataURL(files[0]);
-		});
-		local.fileReader.onload = function (e)
-		{
-			$("#traceImage").attr("src", e.target.result);
-		};
-	}
-	
-	// Make the toolbox dragable
-	$(".toolboxtitle").mousedown(function (e) {
-		var toolbox = $("#toolbox");
-		toolbox.prop("dragX", e.pageX);
-		toolbox.prop("dragY", e.pageY);
-		
-	});
-	$(document).mousemove(function (e) {
-		var toolbox = $("#toolbox");
-		if (toolbox.prop("dragX") != undefined)
-		{
-			toolbox.css("left", toolbox.offset().left + (e.pageX - toolbox.prop("dragX")));
-			toolbox.css("top", toolbox.offset().top + (e.pageY - toolbox.prop("dragY")));
-			toolbox.prop("dragX", e.pageX);
-			toolbox.prop("dragY", e.pageY);
-		}
-	});
-	$(".toolboxtitle").mouseup(function (e) {
-		var toolbox = $("#toolbox");
-		toolbox.removeProp("dragX");
-	});
+  function init() {
+    setupDrawArea();
+    setupTools();
+    setupPanelEvents();
+    setupKeyboard();
+    setupDrawAreaEvents();
+    setupTheme();
+    setSelectedTool(tools.edit);
 
-	//Fire the keyup event so if any text is filled in by the browser (on refresh for example) then we will show that
-	$("#exportArea").keyup();
-	$("#traceImageURL").keyup();
-});
+    // Fire input event so any pre-filled text is parsed
+    $('#exportArea').dispatchEvent(new Event('input'));
+    if ($('#traceImageURL').value) $('#traceImageURL').dispatchEvent(new Event('input'));
+    updateUndoRedoButtons();
+  }
 
-function eventOnDrawArea(e)
-{
-	if (local.drawArea == undefined) return false;
-	var das = $("#drawAreaSource");
-	var toolbox = $("#toolbox");
-	if (e.pageX < das.offset().left) return false;
-	if (e.pageY < das.offset().top) return false;
-	if (e.pageX > das.offset().left + local.drawWidth) return false;
-	if (e.pageY > das.offset().top + local.drawHeight) return false;
-	if (e.pageX >= toolbox.offset().left && e.pageX <= toolbox.offset().left + toolbox.width() && 
-		e.pageY >= toolbox.offset().top && e.pageY <= toolbox.offset().top + toolbox.height()) return false;
-	if (e.preventDefault) e.preventDefault();
-	e.stopPropagation();
-	e.x = Math.round(((e.pageX - das.offset().left) - local.centerX) / local.gridSize);
-	e.y = -Math.round(((e.pageY - das.offset().top) - local.centerY) / local.gridSize);
-	return true;
-}
+  // ---------- Draw area ----------
 
-function toX(x) { return x * local.gridSize + local.centerX; }
-function toY(y) { return -y * local.gridSize + local.centerY; }
+  function setupDrawArea() {
+    const das = $('#drawAreaSource');
+    drawWidth = das.clientWidth;
+    drawHeight = das.clientHeight;
 
-function updatePath(path)
-{
-	var points = path.points;
-	var str = "";
-	if (points.length > 1)
-	{
-		var p0 = points[points.length-1];
-		str += "M" + toX(p0.x) + "," + toY(p0.y);
-		for(var i=0; i<points.length; i++)
-		{
-			var p1 = points[i];
-			if (p0.type == 1 || p1.type == 1)
-			{
-				var x1 = p0.x + p0.nextCP.x;
-				var y1 = p0.y + p0.nextCP.y;
-				var x2 = p1.x + p1.prevCP.x;
-				var y2 = p1.y + p1.prevCP.y;
-				str += "C" + toX(x1) + "," + toY(y1) + " " + toX(x2) + "," + toY(y2) + " " + toX(p1.x) + "," + toY(p1.y);
-			}else{
-				str += "L" + toX(p1.x) + "," + toY(p1.y);
-			}
-			var p0 = p1;
-		}
-		str += "Z";
-	}
-	path.path.attr("path", str);
-}
+    const unit = state.gridSize * state.subGridSize * 2;
+    drawWidth -= drawWidth % unit;
+    drawHeight -= drawHeight % unit;
 
-function showSelectedCP()
-{
-	if (local.nextCPbox != undefined)
-	{
-		local.nextCPbox.remove();
-		local.nextCPbox = undefined;
-		local.prevCPbox.remove();
-		local.prevCPbox = undefined;
-	}
-	if (local.selectedIdx < 0) return;
-	var p = local.paths[local.currentPath].points[local.selectedIdx];
-	if (p.type == 1)
-	{
-		local.nextCPbox = local.drawArea.rect(toX(p.x + p.nextCP.x) - local.gridSize / 2, toY(p.y + p.nextCP.y) - local.gridSize / 2, local.gridSize, local.gridSize).attr("stroke", "#8080FF");
-		local.prevCPbox = local.drawArea.rect(toX(p.x + p.prevCP.x) - local.gridSize / 2, toY(p.y + p.prevCP.y) - local.gridSize / 2, local.gridSize, local.gridSize).attr("stroke", "#8080FF");
-	}
-}
+    centerX = drawWidth / 2;
+    centerY = drawHeight / 2;
 
-function interpolate(p0, p1, f)
-{
-	return {x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f};
-}
+    drawArea = Raphael('drawAreaSource', drawWidth + 1, drawHeight + 1);
+    drawGrid();
 
-function distance(p0, p1)
-{
-	return Math.sqrt((p0.x-p1.x)*(p0.x-p1.x) + (p0.y-p1.y)*(p0.y-p1.y));
-}
+    window.addEventListener('resize', debounce(handleResize, 200));
+  }
 
-function updateExport()
-{
-	var maxInterpolateSteps = 100;
-	var str = "";
-	for(var i=0; i<local.paths.length; i++)
-	{
-		str += local.paths[i].prefix + "[";
-		if (local.paths[i].points.length > 0)
-		{
-			for(var j=0; j<local.paths[i].points.length; j++)
-			{
-				var p0 = local.paths[i].points[j];
-				var p1 = local.paths[i].points[(j+1)%local.paths[i].points.length];
-				str += "[" + p0.x + "," + p0.y;
-				if (p0.type == 1 || p1.type == 1)
-				{
-					var q0 = {x: p0.x + p0.nextCP.x, y: p0.y + p0.nextCP.y};
-					var q1 = {x: p1.x + p1.prevCP.x, y: p1.y + p1.prevCP.y};
-					var prevPoint = p0;
-					str += "/*1:" + p0.prevCP.x + "," + p0.prevCP.y + "," + p0.nextCP.x + "," + p0.nextCP.y + "*/";
-					for(var n=1;n<maxInterpolateSteps;n+=1)
-					{
-						var k = n / maxInterpolateSteps;
-						//The space makes these points not be used when generating the path again from code.
-						var r0 = interpolate(p0, q0, k);
-						var r1 = interpolate(q0, q1, k);
-						var r2 = interpolate(q1, p1, k);
-						var b0 = interpolate(r0, r1, k);
-						var b1 = interpolate(r1, r2, k);
-						var s = interpolate(b0, b1, k);
-						if (distance(s, prevPoint) >= 1)
-						{
-							prevPoint = s;
-							str += "] ,[";
-							str += (Math.round(s.x * 100) / 100) + "," + (Math.round(s.y * 100) / 100)
-						}
-					}
-				}
-				str += "]";
-				if (j < local.paths[i].points.length - 1)
-					str += ",";
-			}
-		}else{
-			str += "[]";
-		}
-		str += "]" + local.paths[i].postfix;
-	}
-	$("#exportArea").val(str);
-	local.oldExportStr = str;
-}
+  function drawGrid() {
+    if (gridMinor) gridMinor.remove();
+    if (gridMajor) gridMajor.remove();
+    if (axes) axes.remove();
 
-$(document).mousedown(function(e) {
-	if (!eventOnDrawArea(e)) return;
-	local.drag = -1;
-	
-	if (local.currentTool == local.addTool)
-	{
-		if (local.paths.length <= local.currentPath)
-		{	//New path
-			$('#pathListbox option:eq('+local.currentPath+')').text('Path:' + (local.currentPath + 1));
-			$('#pathListbox').append($('<option>').text("[New]")); 
-			local.paths[local.currentPath] = {points: new Array(), prefix: "polygon(", postfix: ");\n"};
-		}
-		var box = local.drawArea.rect(toX(e.x) - local.gridSize / 2, toY(e.y) - local.gridSize / 2, local.gridSize, local.gridSize);
-		local.paths[local.currentPath].points.push({x: e.x, y: e.y, type: 0, box: box, prevCP: {x: 0, y: 0}, nextCP: {x: 0, y: 0}});
-		if (local.paths[local.currentPath].path == undefined)
-			local.paths[local.currentPath].path = local.drawArea.path("").attr("stroke-width", 3);
-		updatePath(local.paths[local.currentPath]);
-		updateExport();
-	}
-	
-	if (local.currentTool == local.editTool)
-	{
-		if (local.paths[local.currentPath] == undefined) return;
-		
-		if (local.selectedIdx > -1 && local.paths[local.currentPath].points[local.selectedIdx].type == 1)
-		{
-			var p = local.paths[local.currentPath].points[local.selectedIdx];
-			if (p.nextCP.x + p.x == e.x && p.nextCP.y + p.y == e.y)
-			{
-				local.dragType = 1;
-				local.drag = local.selectedIdx;
-				return;
-			}
-			if (p.prevCP.x + p.x == e.x && p.prevCP.y + p.y == e.y)
-			{
-				local.dragType = 2;
-				local.drag = local.selectedIdx;
-				return;
-			}
-		}
-		
-		for(var i=0;i<local.paths[local.currentPath].points.length;i++)
-		{
-			if (local.paths[local.currentPath].points[i].x == e.x && local.paths[local.currentPath].points[i].y == e.y)
-			{
-				if (local.selectedIdx > -1)
-					local.paths[local.currentPath].points[local.selectedIdx].box.attr("stroke", "#000000");
+    const g = state.gridSize;
+    const sub = state.subGridSize;
+    let minorStr = '';
+    for (let x = 0; x < drawWidth + 1; x += g)
+      minorStr += 'M' + (x + 0.5) + ',0L' + (x + 0.5) + ',' + (drawHeight + 1);
+    for (let y = 0; y < drawHeight + 1; y += g)
+      minorStr += 'M0,' + (y + 0.5) + 'L' + (drawWidth + 1) + ',' + (y + 0.5);
+    gridMinor = drawArea.path(minorStr).attr('stroke', getCSSVar('--grid-minor'));
 
-				local.drag = i;
-				local.dragType = 0;
-				local.selectedIdx = i;
-				local.paths[local.currentPath].points[local.selectedIdx].box.attr("stroke", "#ff0000");
-				showSelectedCP();
-			}
-		}
-	}
-	
-	if (local.currentTool == local.remTool)
-	{
-		if (local.paths[local.currentPath] == undefined) return;
-		
-		for(var i=0;i<local.paths[local.currentPath].points.length;i++)
-		{
-			if (local.paths[local.currentPath].points[i].x == e.x && local.paths[local.currentPath].points[i].y == e.y)
-			{
-				local.paths[local.currentPath].points[i].box.remove();
-				local.paths[local.currentPath].points.splice(i, 1);
-			}
-		}
-		updatePath(local.paths[local.currentPath]);
-		updateExport();
-	}
-});
-$(document).mousemove(function(e) {
-	if (!eventOnDrawArea(e)) return;
+    let majorStr = '';
+    for (let x = 0; x < drawWidth + 1; x += g * sub)
+      majorStr += 'M' + (x + 0.5) + ',0L' + (x + 0.5) + ',' + (drawHeight + 1);
+    for (let y = 0; y < drawHeight + 1; y += g * sub)
+      majorStr += 'M0,' + (y + 0.5) + 'L' + (drawWidth + 1) + ',' + (y + 0.5);
+    gridMajor = drawArea.path(majorStr).attr('stroke', getCSSVar('--grid-major'));
 
-	$('#cursorCoordinates').text('x = '+e.x + ', y = ' + e.y);
-	
-	if (local.currentTool == local.editTool)
-	{
-		if (local.drag != -1)
-		{
-			var p = local.paths[local.currentPath].points[local.drag];
-			switch(local.dragType)
-			{
-			case 0:
-				p.x = e.x;
-				p.y = e.y;
-				p.box.attr({x: toX(e.x) - local.gridSize / 2, y: toY(e.y) - local.gridSize / 2});
-				break;
-			case 1:
-				p.nextCP.x = e.x - p.x;
-				p.nextCP.y = e.y - p.y;
-				break;
-			case 2:
-				p.prevCP.x = e.x - p.x;
-				p.prevCP.y = e.y - p.y;
-				break;
-			}
-			updatePath(local.paths[local.currentPath]);
-			showSelectedCP();
-			updateExport();
-		}
-	}
-});
-$(document).mouseup(function(e) {
-	local.drag = -1;
-	if (!eventOnDrawArea(e)) return;
-});
+    axes = drawArea
+      .path(
+        'M0,' + (centerY + 0.5) + 'L' + (drawWidth + 1) + ',' + (centerY + 0.5) +
+        'M' + (centerX + 0.5) + ',0L' + (centerX + 0.5) + ',' + (drawHeight + 1)
+      )
+      .attr('stroke', getCSSVar('--axis'));
 
-function setSelectedTool(tool)
-{
-	if (local.currentToolSelection != undefined)
-		local.currentToolSelection.remove();
-	local.currentTool = tool;
-	local.currentToolSelection = local.currentTool.path("M0.5,0.5L0.5,23.5L23.5,23.5L23.5,0.5Z");
-	local.selectedIdx = -1;
-	if (local.currentTool == local.imgTool)
-		$("#imageToolOptions").css("display", "");
-	else
-		$("#imageToolOptions").css("display", "none");
-	if (local.currentTool == local.editTool)
-		$("#editToolOptions").css("display", "");
-	else
-		$("#editToolOptions").css("display", "none");
-}
+    // Make sure grids stay at the bottom
+    gridMinor.toBack();
+    gridMajor.toBack();
+    axes.toBack();
+  }
+
+  function getCSSVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#cccccc';
+  }
+
+  function handleResize() {
+    // Recalculate sizing and redraw everything (Raphael needs a fresh canvas)
+    const das = $('#drawAreaSource');
+    drawWidth = das.clientWidth;
+    drawHeight = das.clientHeight;
+    const unit = state.gridSize * state.subGridSize * 2;
+    drawWidth -= drawWidth % unit;
+    drawHeight -= drawHeight % unit;
+    centerX = drawWidth / 2;
+    centerY = drawHeight / 2;
+    drawArea.setSize(drawWidth + 1, drawHeight + 1);
+    drawGrid();
+    redrawAllPaths();
+  }
+
+  function redrawAllPaths() {
+    for (const path of state.paths) {
+      if (path.path) path.path.remove();
+      for (const p of path.points) {
+        if (p.box) { p.box.remove(); p.box = null; }
+      }
+      path.path = drawArea.path('').attr('stroke-width', 2).attr('stroke', getCSSVar('--text'));
+      updatePath(path);
+    }
+    if (state.paths[state.currentPath]) {
+      const path = state.paths[state.currentPath];
+      path.path.attr('stroke-width', 3);
+      for (const p of path.points) {
+        p.box = makeBox(p.x, p.y);
+      }
+      if (state.selectedIdx >= 0 && state.selectedIdx < path.points.length) {
+        path.points[state.selectedIdx].box.attr('stroke', getCSSVar('--accent'));
+      }
+    }
+  }
+
+  // ---------- Tools ----------
+
+  function setupTools() {
+    tools.edit = makeTool('editToolSource', 'M8,3L8,20L12,17L14,23L18,20L15,15L18,13Z', '#9ca3af');
+    tools.add = makeTool('addToolSource', 'M10,2L14,2L14,10L22,10L22,14L14,14L14,22L10,22L10,14L2,14L2,10L10,10Z', '#22c55e');
+    tools.rem = makeTool('remToolSource', 'M22,10L22,14L2,14L2,10Z', '#ef4444');
+    tools.img = makeImageTool('imgToolSource');
+
+    $('#editToolSource').addEventListener('click', () => setSelectedTool(tools.edit));
+    $('#addToolSource').addEventListener('click', () => setSelectedTool(tools.add));
+    $('#remToolSource').addEventListener('click', () => setSelectedTool(tools.rem));
+    $('#imgToolSource').addEventListener('click', () => setSelectedTool(tools.img));
+
+    makeIcon('editToolCorner', (p) => {
+      p.path('M3,14L18,18L14,3').attr('stroke', getCSSVar('--text'));
+      p.rect(15, 15, 6, 6).attr('stroke', getCSSVar('--text'));
+    });
+    makeIcon('editToolSmooth', (p) => {
+      p.path('M1,12C16,22 22,16 12,1').attr('stroke', getCSSVar('--text'));
+      p.rect(13, 13, 6, 6).attr('stroke', getCSSVar('--text'));
+      p.path('M21,11L11,21').attr('stroke', getCSSVar('--text'));
+      p.rect(8, 18, 6, 6).attr('stroke', getCSSVar('--text'));
+      p.rect(18, 8, 6, 6).attr('stroke', getCSSVar('--text'));
+    });
+
+    $('#editToolCorner').addEventListener('click', () => {
+      if (state.selectedIdx < 0) return;
+      pushHistory();
+      const p = state.paths[state.currentPath].points[state.selectedIdx];
+      p.type = 0;
+      p.prevCP = { x: 0, y: 0 };
+      p.nextCP = { x: 0, y: 0 };
+      updatePath(state.paths[state.currentPath]);
+      showSelectedCP();
+      updateExport();
+    });
+
+    $('#editToolSmooth').addEventListener('click', () => {
+      if (state.selectedIdx < 0) return;
+      pushHistory();
+      const p = state.paths[state.currentPath].points[state.selectedIdx];
+      p.type = 1;
+      p.prevCP = { x: -2, y: -2 };
+      p.nextCP = { x: 2, y: 2 };
+      updatePath(state.paths[state.currentPath]);
+      showSelectedCP();
+      updateExport();
+    });
+  }
+
+  function makeTool(id, pathStr, fill) {
+    const paper = Raphael(id, 24, 24);
+    paper.path(pathStr).attr({ fill, stroke: getCSSVar('--text') });
+    return paper;
+  }
+
+  function makeImageTool(id) {
+    const paper = Raphael(id, 24, 24);
+    paper.path('M3,21L21,21L21,4L3,4Z').attr('stroke', getCSSVar('--text'));
+    paper.path('M5,6L5,12L11,12L11,6Z').attr({ fill: '#f87171', stroke: 'none' });
+    paper.circle(12, 13, 4).attr({ fill: '#4ade80', stroke: 'none' });
+    paper.path('M19,19L11,19L15,13Z').attr({ fill: '#60a5fa', stroke: 'none' });
+    return paper;
+  }
+
+  function makeIcon(id, drawFn) {
+    const paper = Raphael(id, 24, 24);
+    drawFn(paper);
+    return paper;
+  }
+
+  function setSelectedTool(tool) {
+    for (const t of Object.values(tools)) {
+      const node = t.canvas.parentNode;
+      if (node) node.classList.remove('active');
+    }
+    const entry = Object.entries(tools).find(([, v]) => v === tool);
+    if (entry) entry[1].canvas.parentNode.classList.add('active');
+    state.currentTool = tool;
+    state.selectedIdx = -1;
+    showSelectedCP();
+
+    $('#imageToolOptions').hidden = tool !== tools.img;
+    $('#editToolOptions').style.display = tool === tools.edit ? '' : 'none';
+  }
+
+  // ---------- Panel events ----------
+
+  function setupPanelEvents() {
+    // Path listbox
+    const listbox = $('#pathListbox');
+    listbox.selectedIndex = 0;
+    listbox.addEventListener('change', () => {
+      const prev = state.paths[state.currentPath];
+      if (prev) {
+        for (const pt of prev.points) {
+          if (pt.box) { pt.box.remove(); pt.box = null; }
+        }
+        prev.path.attr('stroke-width', 2);
+      }
+      state.currentPath = listbox.selectedIndex;
+      state.selectedIdx = -1;
+      showSelectedCP();
+      const cur = state.paths[state.currentPath];
+      if (cur) {
+        for (const pt of cur.points) {
+          if (pt.box) pt.box.remove();
+          pt.box = makeBox(pt.x, pt.y);
+        }
+        cur.path.attr('stroke-width', 3);
+      }
+    });
+
+    // Export area — use input event so paste also triggers
+    $('#exportArea').addEventListener('input', onExportInput);
+
+    // Trace image
+    $('#traceImageURL').addEventListener('input', () => {
+      $('#traceImage').src = $('#traceImageURL').value;
+    });
+    $('#traceImageScale').addEventListener('input', updateTraceImageSize);
+    $('#traceImage').addEventListener('load', updateTraceImageSize);
+
+    if (typeof FileReader === 'function') {
+      const reader = new FileReader();
+      $('#traceImageFile').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!/^image\//.test(file.type)) {
+          alert('You must select a valid image file!');
+          return;
+        }
+        reader.readAsDataURL(file);
+      });
+      reader.onload = (e) => { $('#traceImage').src = e.target.result; };
+    } else {
+      $('#traceImageFileSpan').hidden = true;
+    }
+
+    // Draggable panel
+    setupDraggablePanel();
+
+    // Theme toggle
+    $('#themeToggle').addEventListener('click', toggleTheme);
+
+    // Undo / redo
+    $('#undoBtn').addEventListener('click', undo);
+    $('#redoBtn').addEventListener('click', redo);
+
+    // Zoom
+    $('#zoomInBtn').addEventListener('click', () => setZoom(state.zoom * 1.25));
+    $('#zoomOutBtn').addEventListener('click', () => setZoom(state.zoom / 1.25));
+    $('#zoomResetBtn').addEventListener('click', () => setZoom(1));
+
+    // Snap toggle
+    $('#snapToggle').addEventListener('change', (e) => {
+      state.snap = e.target.checked;
+    });
+
+    // Grid size
+    $('#gridSizeInput').addEventListener('change', (e) => {
+      const v = parseInt(e.target.value, 10);
+      if (Number.isFinite(v) && v >= 2 && v <= 64) {
+        state.gridSize = v;
+        handleResize();
+      }
+    });
+
+    // Copy and clear
+    $('#copyBtn').addEventListener('click', async () => {
+      const text = $('#exportArea').value;
+      try {
+        await navigator.clipboard.writeText(text);
+        flashButton('#copyBtn', 'Copied!');
+      } catch {
+        $('#exportArea').select();
+        document.execCommand('copy');
+        flashButton('#copyBtn', 'Copied!');
+      }
+    });
+    $('#clearBtn').addEventListener('click', () => {
+      if (!confirm('Clear all paths?')) return;
+      pushHistory();
+      clearAllPaths();
+      $('#exportArea').value = '';
+      state.oldExportStr = '';
+    });
+  }
+
+  function flashButton(sel, msg) {
+    const btn = $(sel);
+    const orig = btn.textContent;
+    btn.textContent = msg;
+    setTimeout(() => { btn.textContent = orig; }, 1200);
+  }
+
+  function setupDraggablePanel() {
+    const panel = $('#toolbox');
+    const handle = panel.querySelector('[data-drag-handle]');
+    let dragX = 0, dragY = 0, dragging = false;
+
+    handle.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button')) return;
+      dragging = true;
+      dragX = e.pageX;
+      dragY = e.pageY;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const r = panel.getBoundingClientRect();
+      panel.style.left = (r.left + (e.pageX - dragX)) + 'px';
+      panel.style.top = (r.top + (e.pageY - dragY)) + 'px';
+      dragX = e.pageX;
+      dragY = e.pageY;
+    });
+    document.addEventListener('mouseup', () => { dragging = false; });
+  }
+
+  function updateTraceImageSize() {
+    const img = $('#traceImage');
+    const scale = parseInt($('#traceImageScale').value, 10) || 100;
+    img.style.width = '';
+    img.style.width = (img.naturalWidth * scale / 100) + 'px';
+    const wrapperRect = $('#drawAreaSource').getBoundingClientRect();
+    img.style.left = (centerX - img.offsetWidth / 2 + wrapperRect.left) + 'px';
+    img.style.top = (centerY - img.offsetHeight / 2 + wrapperRect.top) + 'px';
+  }
+
+  // ---------- Theme ----------
+
+  function setupTheme() {
+    const saved = localStorage.getItem('osped-theme');
+    if (saved) document.documentElement.dataset.theme = saved;
+    updateThemeIcon();
+  }
+  function toggleTheme() {
+    const current = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = current;
+    localStorage.setItem('osped-theme', current);
+    updateThemeIcon();
+    drawGrid();
+    redrawAllPaths();
+  }
+  function updateThemeIcon() {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    $('#themeToggle').innerHTML = dark ? '&#9789;' : '&#9788;';
+  }
+
+  // ---------- Coordinates ----------
+
+  function toX(x) { return x * state.gridSize + centerX; }
+  function toY(y) { return -y * state.gridSize + centerY; }
+
+  function makeBox(x, y) {
+    return drawArea
+      .rect(toX(x) - state.gridSize / 2, toY(y) - state.gridSize / 2, state.gridSize, state.gridSize)
+      .attr('stroke', getCSSVar('--text'));
+  }
+
+  // Returns null if event is not on the draw area or is on the toolbox
+  function eventToGrid(e) {
+    const das = $('#drawAreaSource');
+    const toolbox = $('#toolbox');
+    const dRect = das.getBoundingClientRect();
+    if (e.pageX < dRect.left || e.pageY < dRect.top) return null;
+    if (e.pageX > dRect.left + drawWidth || e.pageY > dRect.top + drawHeight) return null;
+    const tRect = toolbox.getBoundingClientRect();
+    if (
+      e.pageX >= tRect.left && e.pageX <= tRect.right &&
+      e.pageY >= tRect.top && e.pageY <= tRect.bottom
+    ) return null;
+
+    if (e.preventDefault) e.preventDefault();
+    e.stopPropagation();
+    const rawX = (e.pageX - dRect.left - centerX) / state.gridSize;
+    const rawY = -(e.pageY - dRect.top - centerY) / state.gridSize;
+    const x = state.snap ? Math.round(rawX) : Math.round(rawX * 100) / 100;
+    const y = state.snap ? Math.round(rawY) : Math.round(rawY * 100) / 100;
+    return { x, y, rawX, rawY };
+  }
+
+  // ---------- Path math ----------
+
+  function updatePath(path) {
+    const points = path.points;
+    let str = '';
+    if (points.length > 1) {
+      let p0 = points[points.length - 1];
+      str += 'M' + toX(p0.x) + ',' + toY(p0.y);
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i];
+        if (p0.type == 1 || p1.type == 1) {
+          const x1 = p0.x + p0.nextCP.x;
+          const y1 = p0.y + p0.nextCP.y;
+          const x2 = p1.x + p1.prevCP.x;
+          const y2 = p1.y + p1.prevCP.y;
+          str += 'C' + toX(x1) + ',' + toY(y1) + ' ' + toX(x2) + ',' + toY(y2) + ' ' + toX(p1.x) + ',' + toY(p1.y);
+        } else {
+          str += 'L' + toX(p1.x) + ',' + toY(p1.y);
+        }
+        p0 = p1;
+      }
+      str += 'Z';
+    }
+    path.path.attr('path', str);
+  }
+
+  function showSelectedCP() {
+    if (state.nextCPbox) { state.nextCPbox.remove(); state.nextCPbox = null; }
+    if (state.prevCPbox) { state.prevCPbox.remove(); state.prevCPbox = null; }
+    if (state.selectedIdx < 0) return;
+    const path = state.paths[state.currentPath];
+    if (!path) return;
+    const p = path.points[state.selectedIdx];
+    if (!p || p.type !== 1) return;
+    state.nextCPbox = drawArea
+      .rect(toX(p.x + p.nextCP.x) - state.gridSize / 2, toY(p.y + p.nextCP.y) - state.gridSize / 2, state.gridSize, state.gridSize)
+      .attr('stroke', '#8080FF');
+    state.prevCPbox = drawArea
+      .rect(toX(p.x + p.prevCP.x) - state.gridSize / 2, toY(p.y + p.prevCP.y) - state.gridSize / 2, state.gridSize, state.gridSize)
+      .attr('stroke', '#8080FF');
+  }
+
+  function interpolate(p0, p1, f) {
+    return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
+  }
+  function distance(p0, p1) {
+    return Math.sqrt((p0.x - p1.x) ** 2 + (p0.y - p1.y) ** 2);
+  }
+
+  function updateExport() {
+    if (state.suppressExport) return;
+    const maxInterpolateSteps = 100;
+    let str = '';
+    for (const path of state.paths) {
+      str += path.prefix + '[';
+      if (path.points.length > 0) {
+        for (let j = 0; j < path.points.length; j++) {
+          const p0 = path.points[j];
+          const p1 = path.points[(j + 1) % path.points.length];
+          str += '[' + p0.x + ',' + p0.y;
+          if (p0.type == 1 || p1.type == 1) {
+            const q0 = { x: p0.x + p0.nextCP.x, y: p0.y + p0.nextCP.y };
+            const q1 = { x: p1.x + p1.prevCP.x, y: p1.y + p1.prevCP.y };
+            let prevPoint = p0;
+            str += '/*1:' + p0.prevCP.x + ',' + p0.prevCP.y + ',' + p0.nextCP.x + ',' + p0.nextCP.y + '*/';
+            for (let n = 1; n < maxInterpolateSteps; n++) {
+              const k = n / maxInterpolateSteps;
+              const r0 = interpolate(p0, q0, k);
+              const r1 = interpolate(q0, q1, k);
+              const r2 = interpolate(q1, p1, k);
+              const b0 = interpolate(r0, r1, k);
+              const b1 = interpolate(r1, r2, k);
+              const s = interpolate(b0, b1, k);
+              if (distance(s, prevPoint) >= 1) {
+                prevPoint = s;
+                str += '] ,[';
+                str += (Math.round(s.x * 100) / 100) + ',' + (Math.round(s.y * 100) / 100);
+              }
+            }
+          }
+          str += ']';
+          if (j < path.points.length - 1) str += ',';
+        }
+      } else {
+        str += '[]';
+      }
+      str += ']' + path.postfix;
+    }
+    $('#exportArea').value = str;
+    state.oldExportStr = str;
+    emitPathsChanged();
+  }
+
+  function onExportInput() {
+    const str = $('#exportArea').value;
+    if (str === state.oldExportStr) return;
+    state.oldExportStr = str;
+    parseImportedCode(str);
+  }
+
+  function parseImportedCode(str) {
+    clearAllPaths();
+
+    const startMarker = '[[';
+    let startIdx = str.indexOf(startMarker);
+    let prevEnd = 0;
+    let p = 0;
+    let optionStr = '';
+    while (startIdx > -1) {
+      const endIdx = str.indexOf(']]', startIdx);
+      if (endIdx === -1) break;
+      state.paths[p] = { points: [], prefix: str.substring(prevEnd, startIdx), postfix: '' };
+      prevEnd = endIdx + 2;
+      const polyString = str.substring(startIdx + 2, endIdx).split('],[');
+      for (const part of polyString) {
+        const nums = part.split(',');
+        const x = parseInt(nums[0], 10);
+        const y = parseInt(nums[1], 10);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const point = { x, y, type: 0, nextCP: { x: 0, y: 0 }, prevCP: { x: 0, y: 0 } };
+        if (part.indexOf('/*') > 0) {
+          let extra = part.substring(part.indexOf('/*') + 2);
+          extra = extra.substring(0, extra.length - 2);
+          const colonSplit = extra.split(':');
+          point.type = parseInt(colonSplit[0], 10);
+          const cpNums = colonSplit[1].split(',');
+          point.prevCP = { x: parseInt(cpNums[0], 10), y: parseInt(cpNums[1], 10) };
+          point.nextCP = { x: parseInt(cpNums[2], 10), y: parseInt(cpNums[3], 10) };
+        }
+        state.paths[p].points.push(point);
+      }
+      state.paths[p].path = drawArea.path('').attr('stroke-width', 2).attr('stroke', getCSSVar('--text'));
+      updatePath(state.paths[p]);
+      p++;
+      optionStr += '<option>Path:' + p + '</option>';
+      startIdx = str.indexOf(startMarker, startIdx + 1);
+    }
+    if (p > 0) state.paths[p - 1].postfix = str.substring(prevEnd);
+    optionStr += '<option>[New]</option>';
+    $('#pathListbox').innerHTML = optionStr;
+    $('#pathListbox').selectedIndex = 0;
+    state.currentPath = 0;
+    $('#pathListbox').dispatchEvent(new Event('change'));
+    emitPathsChanged();
+  }
+
+  function clearAllPaths() {
+    for (const path of state.paths) {
+      for (const pt of path.points) {
+        if (pt.box) pt.box.remove();
+      }
+      if (path.path) path.path.remove();
+    }
+    state.paths = [];
+    state.selectedIdx = -1;
+    state.currentPath = 0;
+    showSelectedCP();
+    $('#pathListbox').innerHTML = '<option>[New]</option>';
+    $('#pathListbox').selectedIndex = 0;
+  }
+
+  // ---------- Draw area interaction ----------
+
+  function setupDrawAreaEvents() {
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    // Zoom with wheel
+    $('#wrapper').addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+      setZoom(state.zoom * factor);
+    }, { passive: false });
+  }
+
+  function handleMouseDown(e) {
+    if (e.button !== 0) return;
+    const g = eventToGrid(e);
+    if (!g) return;
+    state.drag = -1;
+
+    if (state.currentTool === tools.add) {
+      pushHistory();
+      if (state.paths.length <= state.currentPath) {
+        const opts = $('#pathListbox').options;
+        if (opts[state.currentPath]) {
+          opts[state.currentPath].textContent = 'Path:' + (state.currentPath + 1);
+        }
+        const newOpt = document.createElement('option');
+        newOpt.textContent = '[New]';
+        $('#pathListbox').appendChild(newOpt);
+        state.paths[state.currentPath] = { points: [], prefix: 'polygon(', postfix: ');\n' };
+      }
+      const box = makeBox(g.x, g.y);
+      state.paths[state.currentPath].points.push({
+        x: g.x, y: g.y, type: 0, box,
+        prevCP: { x: 0, y: 0 }, nextCP: { x: 0, y: 0 },
+      });
+      if (!state.paths[state.currentPath].path) {
+        state.paths[state.currentPath].path = drawArea.path('').attr('stroke-width', 3).attr('stroke', getCSSVar('--text'));
+      }
+      updatePath(state.paths[state.currentPath]);
+      updateExport();
+      return;
+    }
+
+    if (state.currentTool === tools.edit) {
+      const path = state.paths[state.currentPath];
+      if (!path) return;
+
+      // Check for control point drag
+      if (state.selectedIdx > -1 && path.points[state.selectedIdx].type === 1) {
+        const p = path.points[state.selectedIdx];
+        if (Math.abs(p.x + p.nextCP.x - g.x) < 0.5 && Math.abs(p.y + p.nextCP.y - g.y) < 0.5) {
+          state.dragType = 1;
+          state.drag = state.selectedIdx;
+          pushHistory();
+          return;
+        }
+        if (Math.abs(p.x + p.prevCP.x - g.x) < 0.5 && Math.abs(p.y + p.prevCP.y - g.y) < 0.5) {
+          state.dragType = 2;
+          state.drag = state.selectedIdx;
+          pushHistory();
+          return;
+        }
+      }
+
+      // Select a point
+      for (let i = 0; i < path.points.length; i++) {
+        if (path.points[i].x === g.x && path.points[i].y === g.y) {
+          if (state.selectedIdx > -1 && path.points[state.selectedIdx] && path.points[state.selectedIdx].box) {
+            path.points[state.selectedIdx].box.attr('stroke', getCSSVar('--text'));
+          }
+          state.drag = i;
+          state.dragType = 0;
+          state.selectedIdx = i;
+          path.points[i].box.attr('stroke', getCSSVar('--accent'));
+          showSelectedCP();
+          pushHistory();
+          return;
+        }
+      }
+      return;
+    }
+
+    if (state.currentTool === tools.rem) {
+      const path = state.paths[state.currentPath];
+      if (!path) return;
+      let removed = false;
+      for (let i = 0; i < path.points.length; i++) {
+        if (path.points[i].x === g.x && path.points[i].y === g.y) {
+          if (!removed) pushHistory();
+          path.points[i].box.remove();
+          path.points.splice(i, 1);
+          removed = true;
+          i--;
+        }
+      }
+      if (removed) {
+        state.selectedIdx = -1;
+        showSelectedCP();
+        updatePath(path);
+        updateExport();
+      }
+    }
+  }
+
+  function handleMouseMove(e) {
+    const g = eventToGrid(e);
+    if (!g) return;
+    $('#cursorCoordinates').textContent = 'x = ' + g.x + ', y = ' + g.y;
+
+    if (state.currentTool !== tools.edit || state.drag === -1) return;
+    const path = state.paths[state.currentPath];
+    if (!path) return;
+    const p = path.points[state.drag];
+    if (!p) return;
+    switch (state.dragType) {
+      case 0:
+        p.x = g.x;
+        p.y = g.y;
+        p.box.attr({ x: toX(g.x) - state.gridSize / 2, y: toY(g.y) - state.gridSize / 2 });
+        break;
+      case 1:
+        p.nextCP.x = g.x - p.x;
+        p.nextCP.y = g.y - p.y;
+        break;
+      case 2:
+        p.prevCP.x = g.x - p.x;
+        p.prevCP.y = g.y - p.y;
+        break;
+    }
+    updatePath(path);
+    showSelectedCP();
+    updateExport();
+  }
+
+  function handleMouseUp() {
+    state.drag = -1;
+  }
+
+  // ---------- Zoom ----------
+
+  function setZoom(z) {
+    z = Math.max(0.25, Math.min(z, 8));
+    state.zoom = z;
+    // Use Raphael's setViewBox to zoom
+    const w = (drawWidth + 1) / z;
+    const h = (drawHeight + 1) / z;
+    const x = centerX - w / 2;
+    const y = centerY - h / 2;
+    drawArea.setViewBox(x, y, w, h, true);
+    $('#zoomIndicator').textContent = Math.round(z * 100) + '%';
+  }
+
+  // ---------- Undo / redo ----------
+
+  function snapshotPaths() {
+    return JSON.parse(JSON.stringify(state.paths.map((p) => ({
+      points: p.points.map((pt) => ({
+        x: pt.x, y: pt.y, type: pt.type,
+        prevCP: { ...pt.prevCP }, nextCP: { ...pt.nextCP },
+      })),
+      prefix: p.prefix,
+      postfix: p.postfix,
+    }))));
+  }
+
+  function pushHistory() {
+    if (state.historyIndex < state.history.length - 1) {
+      state.history = state.history.slice(0, state.historyIndex + 1);
+    }
+    state.history.push(snapshotPaths());
+    if (state.history.length > state.historyLimit) state.history.shift();
+    state.historyIndex = state.history.length - 1;
+    updateUndoRedoButtons();
+  }
+
+  function restoreSnapshot(snap) {
+    state.suppressExport = true;
+    clearAllPaths();
+    for (let i = 0; i < snap.length; i++) {
+      state.paths[i] = {
+        points: snap[i].points.map((pt) => ({
+          x: pt.x, y: pt.y, type: pt.type,
+          prevCP: { ...pt.prevCP }, nextCP: { ...pt.nextCP },
+          box: null,
+        })),
+        prefix: snap[i].prefix,
+        postfix: snap[i].postfix,
+        path: drawArea.path('').attr('stroke-width', 2).attr('stroke', getCSSVar('--text')),
+      };
+      updatePath(state.paths[i]);
+    }
+    let optionStr = '';
+    for (let i = 0; i < state.paths.length; i++) optionStr += '<option>Path:' + (i + 1) + '</option>';
+    optionStr += '<option>[New]</option>';
+    $('#pathListbox').innerHTML = optionStr;
+    state.currentPath = Math.min(state.currentPath, state.paths.length);
+    $('#pathListbox').selectedIndex = state.currentPath;
+    $('#pathListbox').dispatchEvent(new Event('change'));
+    state.suppressExport = false;
+    updateExport();
+  }
+
+  function undo() {
+    if (state.historyIndex <= 0) return;
+    if (state.historyIndex === state.history.length - 1) {
+      // capture current state so redo can return to it
+      state.history.push(snapshotPaths());
+    }
+    state.historyIndex--;
+    restoreSnapshot(state.history[state.historyIndex]);
+    updateUndoRedoButtons();
+  }
+
+  function redo() {
+    if (state.historyIndex >= state.history.length - 1) return;
+    state.historyIndex++;
+    restoreSnapshot(state.history[state.historyIndex]);
+    updateUndoRedoButtons();
+  }
+
+  function updateUndoRedoButtons() {
+    $('#undoBtn').disabled = state.historyIndex <= 0;
+    $('#redoBtn').disabled = state.historyIndex >= state.history.length - 1;
+  }
+
+  // ---------- Keyboard ----------
+
+  function setupKeyboard() {
+    document.addEventListener('keydown', (e) => {
+      const target = e.target;
+      const inField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
+      const mod = e.ctrlKey || e.metaKey;
+
+      if (mod && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (inField) return;
+
+      switch (e.key) {
+        case 'e': case 'E': setSelectedTool(tools.edit); break;
+        case 'a': case 'A': setSelectedTool(tools.add); break;
+        case 'r': case 'R': setSelectedTool(tools.rem); break;
+        case 'i': case 'I': setSelectedTool(tools.img); break;
+        case '+': case '=': setZoom(state.zoom * 1.25); break;
+        case '-': case '_': setZoom(state.zoom / 1.25); break;
+        case '0': setZoom(1); break;
+        case 'Delete': case 'Backspace':
+          if (state.selectedIdx >= 0) {
+            pushHistory();
+            const path = state.paths[state.currentPath];
+            path.points[state.selectedIdx].box.remove();
+            path.points.splice(state.selectedIdx, 1);
+            state.selectedIdx = -1;
+            showSelectedCP();
+            updatePath(path);
+            updateExport();
+          }
+          break;
+      }
+    });
+  }
+
+  // ---------- Util ----------
+
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
+  }
+})();

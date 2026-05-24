@@ -1,5 +1,66 @@
-WHAT IS IT?
-===========
-The OpenSCAD Polygon editor is a editor for OpenSCAD polygons (DUH).
-OpenSCAD is a scripted CAD tool found at http://www.openscad.org/ it's great for many reasons. But it's all script which makes it hard to do some things.
-The OpenSCAD Polygon editor (OsPed) helps you. You can just copy/paste your OpenSCAD code to OsPed and it will allow you to edit the polygons. Updating the copied code on the fly.
+OpenSCAD Polygon Editor
+=======================
+
+A web-based visual editor for OpenSCAD `polygon([...])` data. Paste your
+OpenSCAD code, drag points around, and the source updates live.
+
+OpenSCAD itself is a scripted CAD tool: http://www.openscad.org/
+
+Original project: https://github.com/daid/OpenSCAD-polygon-editor
+
+Usage
+-----
+Open `index.html` in any modern browser. No build step or server needed.
+
+Tools
+-----
+- Edit (E)   — Select and drag points. Click again on a smooth point's
+               control points to drag handles.
+- Add  (A)   — Click on the grid to append a point to the current path.
+- Rem  (R)   — Click a point to delete it.
+- Image (I)  — Load an image to trace over (URL or local file).
+
+Path-point types (with Edit tool active):
+- Corner — straight segments between neighbors.
+- Smooth — Bezier control points that you can drag.
+
+Features
+--------
+- Undo / redo                       (Ctrl/Cmd+Z, Ctrl+Y or Ctrl+Shift+Z)
+- Zoom                              (Ctrl/Cmd+wheel, +/- keys, 0 to reset)
+- Snap to grid toggle
+- Adjustable grid size
+- Keyboard delete for selected point (Del / Backspace)
+- Copy code to clipboard
+- Clear all paths
+- Dark / light theme toggle (persisted)
+- Live SVG drawing area, responsive to window resize
+- Trace image overlay (URL or local file)
+
+3D Preview
+----------
+Toggle "Enable 3D" in the toolbox to open a live 3D viewport beside the 2D
+editor. The current polygons are extruded into solid geometry and rendered
+with Three.js + OrbitControls (drag to orbit, scroll to zoom, right-drag to
+pan).
+
+Two extrusion modes:
+- Linear extrude — height + optional twist (deg) and end-scale.
+- Rotate extrude — sweep around the Z axis with adjustable segments and
+  angle (matches OpenSCAD's `rotate_extrude`).
+
+"Copy 3D" copies generated `linear_extrude(...) polygon([...])` or
+`rotate_extrude(...) polygon([...])` code, ready to paste into OpenSCAD.
+
+Dependencies
+------------
+- Raphael 2.3.0 — CDN, for 2D SVG.
+- Three.js 0.160 + OrbitControls — CDN ES modules via importmap, for 3D.
+- No jQuery; everything else is vanilla JS / standard browser APIs.
+
+File overview
+-------------
+- index.html — page layout
+- style.css  — modern theme (CSS variables, light/dark)
+- osped.js   — 2D polygon editor logic + OspedAPI bridge
+- three3d.js — 3D viewport (ES module)

@@ -1,33 +1,158 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<title>OpenSCAD polygon builder</title>
-<link rel="stylesheet" type="text/css" href="style.css">
-<script type="text/javascript" src="jquery-1.7.1.min.js"></script>
-<script type="text/javascript" src="raphael-min.js"></script>
-<script type="text/javascript" src="osped.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenSCAD Polygon Editor</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/raphael@2.3.0/raphael.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 </head>
 <body>
 
-<table style="position: absolute; z-index:1; left: 10px; top 10px;" id="toolbox">
-<tr><th colspan="4" class="toolboxtitle">Toolbox
-<tr><td id="editToolSource"><td id="addToolSource"><td id="remToolSource"><td id="imgToolSource">
-<tr id="editToolOptions"><td id="editToolCorner"><td id="editToolSmooth"><td><td>
-<tr><td colspan="4" id="imageToolOptions" style="display: none;">
-	Url: <input type="text" id="traceImageURL" style="width: 100px"><br \>
-	<span id="traceImageFileSpan">File: <input id="traceImageFile" type="file" style="width: 100px" /><br \></span>
-	Scale: <input type="text" id="traceImageScale" style="width: 40px" value="100">%
-<tr><th colspan="4" class="toolboxtitle">Paths
-<tr><td colspan="4"><select size="10" id="pathListbox" style="width: 140px"><option>[New]</select>
-<tr><th colspan="4" class="toolboxtitle">OpenSCAD code
-<tr><td colspan="4"><textarea id="exportArea" style="width:130px; height: 200px;"></textarea>
-</table>
+<aside id="toolbox" class="panel">
+  <header class="panel-header" data-drag-handle>
+    <h2>Toolbox</h2>
+    <button type="button" id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">&#9788;</button>
+  </header>
 
-<div id="wrapper">
-<img id="traceImage" style="position: absolute; left: 0px;">
-<div id="drawAreaSource"></div>
-<div id="cursorCoordinates" style="float: left"></div>
-<div id="urlDiv" style="position: absolute; right: 0px"><a href="https://github.com/daid/OpenSCAD-polygon-editor">source</a></div>
-</div>
+  <div class="tool-grid">
+    <button type="button" class="tool-btn" id="editToolSource" title="Edit (E)" aria-label="Edit tool"></button>
+    <button type="button" class="tool-btn" id="addToolSource" title="Add point (A)" aria-label="Add tool"></button>
+    <button type="button" class="tool-btn" id="remToolSource" title="Remove point (R)" aria-label="Remove tool"></button>
+    <button type="button" class="tool-btn" id="imgToolSource" title="Trace image (I)" aria-label="Image tool"></button>
+  </div>
+
+  <div id="editToolOptions" class="tool-grid sub-grid">
+    <button type="button" class="tool-btn" id="editToolCorner" title="Corner point" aria-label="Corner point"></button>
+    <button type="button" class="tool-btn" id="editToolSmooth" title="Smooth point" aria-label="Smooth point"></button>
+  </div>
+
+  <div id="imageToolOptions" class="tool-options" hidden>
+    <label>URL <input type="text" id="traceImageURL"></label>
+    <label id="traceImageFileSpan">File <input id="traceImageFile" type="file" accept="image/*"></label>
+    <label>Scale <input type="number" id="traceImageScale" min="1" max="1000" step="1" value="100">%</label>
+  </div>
+
+  <section class="panel-section">
+    <h3>Actions</h3>
+    <div class="action-row">
+      <button type="button" id="undoBtn" title="Undo (Ctrl+Z)">Undo</button>
+      <button type="button" id="redoBtn" title="Redo (Ctrl+Y / Ctrl+Shift+Z)">Redo</button>
+    </div>
+    <div class="action-row">
+      <button type="button" id="zoomInBtn" title="Zoom in (+)">Zoom +</button>
+      <button type="button" id="zoomOutBtn" title="Zoom out (-)">Zoom -</button>
+      <button type="button" id="zoomResetBtn" title="Reset zoom (0)">Reset</button>
+    </div>
+    <div class="action-row">
+      <label class="checkbox"><input type="checkbox" id="snapToggle" checked> Snap to grid</label>
+    </div>
+    <div class="action-row">
+      <label>Grid <input type="number" id="gridSizeInput" min="2" max="64" step="1" value="8" style="width: 48px"></label>
+    </div>
+  </section>
+
+  <section class="panel-section">
+    <h3>3D Primitives</h3>
+    <div class="prim-grid">
+      <button type="button" data-snippet="cube([20, 20, 20], center=true);">Cube</button>
+      <button type="button" data-snippet="sphere(r=10, $fn=48);">Sphere</button>
+      <button type="button" data-snippet="cylinder(h=20, r=8, $fn=48);">Cylinder</button>
+      <button type="button" data-snippet="cylinder(h=20, r1=10, r2=0, $fn=48);">Cone</button>
+      <button type="button" data-snippet="translate([0, 0, 10]) cube(5);">Translate</button>
+      <button type="button" data-snippet="rotate([0, 0, 45]) cube(10);">Rotate</button>
+      <button type="button" data-snippet="color(&quot;tomato&quot;) sphere(8);">Color</button>
+      <button type="button" data-snippet="linear_extrude(height=10, twist=30, scale=0.5) polygon([[0,0],[10,0],[10,10],[0,10]]);">Extrude</button>
+    </div>
+    <div class="action-row">
+      <button type="button" id="loadExampleBtn" title="Replace code with an example scene">Load Example</button>
+      <button type="button" id="clearCodeBtn" title="Clear code area">Clear Code</button>
+    </div>
+  </section>
+
+  <section class="panel-section">
+    <h3>3D Preview</h3>
+    <div class="action-row">
+      <button type="button" id="runDemoBtn" class="primary-btn" title="Hardcoded scene that bypasses the parser — proves the renderer works">▶ Run 3D Demo</button>
+    </div>
+    <div class="action-row">
+      <button type="button" id="enable3DBtn" class="primary-btn">Show 3D View</button>
+    </div>
+    <div class="action-row">
+      <button type="button" id="fullscreen3DBtn" title="Maximize 3D viewport (hides 2D)" disabled>Fullscreen 3D</button>
+    </div>
+    <div class="action-row">
+      <label>Mode
+        <select id="extrudeMode">
+          <option value="linear">Linear extrude</option>
+          <option value="rotate">Rotate extrude</option>
+        </select>
+      </label>
+    </div>
+    <div id="linearControls">
+      <div class="action-row">
+        <label>Height <input type="number" id="extrudeHeight" min="0.1" step="0.5" value="10" style="width: 60px"></label>
+      </div>
+      <div class="action-row">
+        <label>Twist <input type="number" id="extrudeTwist" step="5" value="0" style="width: 60px"></label>
+        <label>Scale <input type="number" id="extrudeScale" min="0.01" step="0.1" value="1" style="width: 60px"></label>
+      </div>
+    </div>
+    <div id="rotateControls" hidden>
+      <div class="action-row">
+        <label>Segments <input type="number" id="extrudeSegments" min="3" step="1" value="64" style="width: 60px"></label>
+      </div>
+      <div class="action-row">
+        <label>Angle <input type="number" id="extrudeAngle" min="1" max="360" step="5" value="360" style="width: 60px"></label>
+      </div>
+    </div>
+    <div class="action-row">
+      <button type="button" id="resetCameraBtn" title="Reset camera">Reset View</button>
+      <button type="button" id="copy3DBtn" title="Copy 3D OpenSCAD code">Copy 3D</button>
+    </div>
+  </section>
+
+  <section class="panel-section">
+    <h3>Paths</h3>
+    <select size="6" id="pathListbox">
+      <option>[New]</option>
+    </select>
+  </section>
+
+  <section class="panel-section">
+    <h3>OpenSCAD code</h3>
+    <textarea id="exportArea" spellcheck="false" placeholder="polygon([[0,0],[10,0],[10,10]]);"></textarea>
+    <div class="action-row">
+      <button type="button" id="copyBtn" title="Copy code to clipboard">Copy</button>
+      <button type="button" id="clearBtn" title="Clear all paths">Clear</button>
+    </div>
+  </section>
+</aside>
+
+<main id="wrapper">
+  <img id="traceImage" alt="">
+  <div id="drawAreaSource"></div>
+  <div id="viewport3d" hidden>
+    <div id="viewport3dHint">Draw a polygon (Add tool · A) to see the 3D preview</div>
+    <div id="viewport3dDebug">3D ready</div>
+  </div>
+  <div id="statusBar">
+    <span id="cursorCoordinates">x = 0, y = 0</span>
+    <span id="zoomIndicator">100%</span>
+    <span id="viewport3dStatus" hidden>Drag to orbit · Scroll to zoom · Right-drag to pan</span>
+    <a href="https://github.com/daid/OpenSCAD-polygon-editor" target="_blank" rel="noopener">source</a>
+  </div>
+</main>
+
+<script src="osped.js"></script>
+<script type="module" src="three3d.js"></script>
 </body>
 </html>
