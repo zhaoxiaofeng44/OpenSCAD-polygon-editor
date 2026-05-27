@@ -113,17 +113,329 @@ button:hover:not(:disabled) {
   border-color: #15803d;
 }
 
-.prim-grid {
+.prim-tiles {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
   margin-bottom: 8px;
 }
 
-.prim-grid button {
+.prim-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 4px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.prim-tile:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+
+.prim-tile-icon {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.prim-tile-name {
   font-size: 11px;
-  padding: 6px 4px;
+  color: var(--text);
+}
+
+.prim-tile.active {
+  background: var(--bg);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.prim-subtiles {
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius-sm);
+}
+
+.prim-subtiles-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.prim-subtiles .prim-tiles {
+  margin-bottom: 0;
+}
+
+/* Primitive parameter block inside the selection panel */
+.prim-params-block {
+  margin: 6px 0 10px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+}
+
+.prim-params-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.prim-params-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 6px;
+}
+
+.prim-params-grid label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.prim-params-grid input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+.prim-params-grid label.checkbox-inline {
+  grid-column: 1 / -1;
+  color: var(--text);
+}
+
+.prim-params-grid input[type="checkbox"] {
+  margin: 0;
+}
+
+.hint-text {
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.x-btn {
+  float: right;
+  padding: 0 6px;
+  font-size: 14px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.x-btn:hover {
+  background: var(--danger);
+  color: white;
+  border-radius: 3px;
+}
+
+.gizmo-mode-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* ---------- Scene tree ---------- */
+.scene-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 4px 0;
+}
+.scene-tree .empty-hint {
+  color: var(--text-muted);
+  padding: 8px 10px;
+  font-style: italic;
+  font-size: 11px;
+}
+.scene-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 14px;
+  border-left: 1px dashed var(--panel-border);
+}
+.scene-tree .tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scene-tree .tree-row:hover {
+  background: rgba(37, 99, 235, 0.1);
+}
+.scene-tree .tree-row.selected {
+  background: var(--accent);
+  color: white;
+}
+.scene-tree .tree-row.selected .tree-args {
+  color: rgba(255, 255, 255, 0.75);
+}
+.scene-tree .tree-icon {
+  display: inline-block;
+  width: 14px;
   text-align: center;
+  font-size: 12px;
+  opacity: 0.9;
+}
+.scene-tree .tree-label b {
+  font-weight: 600;
+}
+.scene-tree .tree-args {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+}
+
+.scene-tree .tree-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+}
+.scene-tree .tree-badge-icon {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+  line-height: 1;
+}
+.scene-tree .tree-badge-color {
+  padding: 1px 6px 1px 3px;
+}
+.scene-tree .tree-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  background: var(--text-muted);
+}
+.scene-tree .tree-row.selected .tree-badge {
+  background: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.92);
+}
+.scene-tree .tree-row.selected .tree-swatch {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.scene-tree .tree-row.multi-selected {
+  background: rgba(96, 165, 250, 0.3);
+  outline: 1px solid var(--accent);
+}
+
+#combinePanel {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+#combinePanel h4 {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+#combinePanel #combineCount {
+  color: var(--accent);
+  font-weight: 600;
+}
+.combine-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.combine-grid button {
+  font-size: 11px;
+  padding: 5px 4px;
+}
+
+/* ---------- Color picker row ---------- */
+.color-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  flex-direction: row !important;
+}
+.color-row input[type="color"] {
+  width: 40px !important;
+  height: 28px;
+  padding: 0 !important;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+}
+
+#selectionPanel .action-row label {
+  flex: 1;
+  font-size: 11px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+#selectionPanel .action-row label input {
+  width: 100%;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+#selectionPanel h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#selectionPanel h3 #selName {
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  flex: 1;
+  margin-left: 4px;
 }
 
 button:active:not(:disabled) {
@@ -135,21 +447,42 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Toolbox panel */
+/* Library category labels */
+.lib-category-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 10px 0 4px;
+  padding-left: 2px;
+}
+
+.lib-category-label:first-child {
+  margin-top: 0;
+}
+
+/* Toolbox panel — docked to left edge */
 .panel {
   position: absolute;
-  left: 16px;
-  top: 16px;
-  width: 220px;
+  left: 0;
+  top: 0;
+  bottom: 32px;
+  width: 260px;
   background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border: none;
+  border-right: 1px solid var(--panel-border);
+  border-radius: 0;
+  box-shadow: none;
   z-index: 10;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 32px);
   overflow: hidden;
+}
+
+body.slice-selected .panel {
+  bottom: auto;
+  max-height: 50vh;
 }
 
 .panel-header {
@@ -159,7 +492,7 @@ button:disabled {
   padding: 10px 14px;
   background: linear-gradient(180deg, rgba(37,99,235,0.06), transparent);
   border-bottom: 1px solid var(--panel-border);
-  cursor: move;
+  cursor: default;
   user-select: none;
 }
 
@@ -311,8 +644,8 @@ button:disabled {
 #viewport3d {
   position: absolute;
   top: 0;
+  left: 260px;
   right: 0;
-  width: 50%;
   bottom: 32px;
   background: #131c2e;
   border-left: 1px solid var(--panel-border);
@@ -323,6 +656,22 @@ button:disabled {
   display: block;
   width: 100% !important;
   height: 100% !important;
+}
+
+#editingBadge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  background: var(--accent);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
 }
 
 #viewport3dHint {
@@ -364,17 +713,28 @@ button:disabled {
   background: rgba(127, 29, 29, 0.85);
 }
 
-body.three-enabled #drawAreaSource {
-  right: 50%;
-  border-right: 1px solid var(--panel-border);
+/* Hide the 2D drawing area entirely unless a polygon-based slice is selected */
+#drawAreaSource { display: none; }
+body.slice-selected #drawAreaSource {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 50vh;
+  bottom: 32px;
+  width: 260px;
+  right: auto;
 }
 
 body.three-fullscreen #drawAreaSource {
   display: none;
 }
 body.three-fullscreen #viewport3d {
-  width: 100%;
+  left: 0;
 }
+
+/* Polygon-tools section only visible when editing a slice */
+.slice-only { display: none; }
+body.slice-selected .slice-only { display: block; }
 
 #traceImage {
   position: absolute;

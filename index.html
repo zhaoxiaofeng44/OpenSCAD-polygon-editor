@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenSCAD Polygon Editor</title>
+<title>OpenSCAD 3D 建模编辑器</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/raphael@2.3.0/raphael.min.js"></script>
 <script type="importmap">
@@ -18,137 +18,187 @@
 <body>
 
 <aside id="toolbox" class="panel">
-  <header class="panel-header" data-drag-handle>
-    <h2>Toolbox</h2>
-    <button type="button" id="themeToggle" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">&#9788;</button>
+  <header class="panel-header">
+    <h2>场景</h2>
+    <button type="button" id="themeToggle" class="icon-btn" title="切换深色模式" aria-label="切换深色模式">&#9788;</button>
   </header>
 
-  <div class="tool-grid">
-    <button type="button" class="tool-btn" id="editToolSource" title="Edit (E)" aria-label="Edit tool"></button>
-    <button type="button" class="tool-btn" id="addToolSource" title="Add point (A)" aria-label="Add tool"></button>
-    <button type="button" class="tool-btn" id="remToolSource" title="Remove point (R)" aria-label="Remove tool"></button>
-    <button type="button" class="tool-btn" id="imgToolSource" title="Trace image (I)" aria-label="Image tool"></button>
-  </div>
-
-  <div id="editToolOptions" class="tool-grid sub-grid">
-    <button type="button" class="tool-btn" id="editToolCorner" title="Corner point" aria-label="Corner point"></button>
-    <button type="button" class="tool-btn" id="editToolSmooth" title="Smooth point" aria-label="Smooth point"></button>
-  </div>
-
-  <div id="imageToolOptions" class="tool-options" hidden>
-    <label>URL <input type="text" id="traceImageURL"></label>
-    <label id="traceImageFileSpan">File <input id="traceImageFile" type="file" accept="image/*"></label>
-    <label>Scale <input type="number" id="traceImageScale" min="1" max="1000" step="1" value="100">%</label>
-  </div>
-
-  <section class="panel-section">
-    <h3>Actions</h3>
-    <div class="action-row">
-      <button type="button" id="undoBtn" title="Undo (Ctrl+Z)">Undo</button>
-      <button type="button" id="redoBtn" title="Redo (Ctrl+Y / Ctrl+Shift+Z)">Redo</button>
-    </div>
-    <div class="action-row">
-      <button type="button" id="zoomInBtn" title="Zoom in (+)">Zoom +</button>
-      <button type="button" id="zoomOutBtn" title="Zoom out (-)">Zoom -</button>
-      <button type="button" id="zoomResetBtn" title="Reset zoom (0)">Reset</button>
-    </div>
-    <div class="action-row">
-      <label class="checkbox"><input type="checkbox" id="snapToggle" checked> Snap to grid</label>
-    </div>
-    <div class="action-row">
-      <label>Grid <input type="number" id="gridSizeInput" min="2" max="64" step="1" value="8" style="width: 48px"></label>
+  <section class="panel-section" id="sceneTreeSection">
+    <h3>场景树 <span class="hint-text">(⌘/Ctrl+点击 多选)</span></h3>
+    <ul id="sceneTree" class="scene-tree"><li class="empty-hint">暂无物体 — 请从下方形状库添加</li></ul>
+    <div id="combinePanel" hidden>
+      <h4>组合 <span id="combineCount">2</span> 个已选物体</h4>
+      <div class="combine-grid">
+        <button type="button" data-op="union" title="合并为一体">∪ 并集</button>
+        <button type="button" data-op="difference" title="从第一个中减去">∖ 差集</button>
+        <button type="button" data-op="intersection" title="仅保留重叠部分">∩ 交集</button>
+        <button type="button" data-op="hull" title="凸包">⌒ 凸包</button>
+        <button type="button" data-op="minkowski" title="闵可夫斯基和">⊕ 闵和</button>
+      </div>
+      <div class="action-row">
+        <button type="button" id="multiDeselectBtn">清除选择</button>
+      </div>
     </div>
   </section>
 
-  <section class="panel-section">
-    <h3>3D Primitives</h3>
-    <div class="prim-grid">
-      <button type="button" data-snippet="cube([20, 20, 20], center=true);">Cube</button>
-      <button type="button" data-snippet="sphere(r=10, $fn=48);">Sphere</button>
-      <button type="button" data-snippet="cylinder(h=20, r=8, $fn=48);">Cylinder</button>
-      <button type="button" data-snippet="cylinder(h=20, r1=10, r2=0, $fn=48);">Cone</button>
-      <button type="button" data-snippet="translate([0, 0, 10]) cube(5);">Translate</button>
-      <button type="button" data-snippet="rotate([0, 0, 45]) cube(10);">Rotate</button>
-      <button type="button" data-snippet="color(&quot;tomato&quot;) sphere(8);">Color</button>
-      <button type="button" data-snippet="linear_extrude(height=10, twist=30, scale=0.5) polygon([[0,0],[10,0],[10,10],[0,10]]);">Extrude</button>
+  <section class="panel-section slice-only" id="polygonToolsSection">
+    <h3>多边形顶点工具 <span class="hint-text">(切片编辑)</span></h3>
+    <div class="tool-grid">
+      <button type="button" class="tool-btn" id="editToolSource" title="编辑/拖动顶点 (E)" aria-label="编辑工具"></button>
+      <button type="button" class="tool-btn" id="addToolSource" title="添加顶点 (A)" aria-label="添加顶点"></button>
+      <button type="button" class="tool-btn" id="remToolSource" title="删除顶点 (R)" aria-label="删除顶点"></button>
+    </div>
+    <div id="editToolOptions" class="tool-grid sub-grid">
+      <button type="button" class="tool-btn" id="editToolCorner" title="尖角点" aria-label="尖角点"></button>
+      <button type="button" class="tool-btn" id="editToolSmooth" title="平滑点" aria-label="平滑点"></button>
     </div>
     <div class="action-row">
-      <button type="button" id="loadExampleBtn" title="Replace code with an example scene">Load Example</button>
-      <button type="button" id="clearCodeBtn" title="Clear code area">Clear Code</button>
+      <button type="button" id="undoBtn" title="撤销 (Ctrl+Z)">撤销</button>
+      <button type="button" id="redoBtn" title="重做 (Ctrl+Y)">重做</button>
+    </div>
+    <div class="action-row">
+      <label class="checkbox"><input type="checkbox" id="snapToggle" checked> 吸附网格</label>
+      <label>网格 <input type="number" id="gridSizeInput" min="2" max="64" step="1" value="8" style="width: 48px"></label>
+    </div>
+    <div class="action-row">
+      <button type="button" id="zoomInBtn" title="放大 (+)">+</button>
+      <button type="button" id="zoomOutBtn" title="缩小 (-)">-</button>
+      <button type="button" id="zoomResetBtn" title="重置缩放 (0)">⊙</button>
     </div>
   </section>
 
+  <!-- legacy hidden trace-image controls (still referenced by osped.js) -->
+  <div id="imageToolOptions" hidden style="display:none">
+    <input type="text" id="traceImageURL">
+    <span id="traceImageFileSpan"><input id="traceImageFile" type="file"></span>
+    <input type="number" id="traceImageScale" value="100">
+  </div>
+
   <section class="panel-section">
-    <h3>3D Preview</h3>
-    <div class="action-row">
-      <button type="button" id="runDemoBtn" class="primary-btn" title="Hardcoded scene that bypasses the parser — proves the renderer works">▶ Run 3D Demo</button>
+    <h3>形状库 <span class="hint-text">点击添加 · 选中后可编辑参数</span></h3>
+
+    <div class="lib-category-label">基础形状</div>
+    <div class="prim-tiles">
+      <button type="button" class="prim-tile" data-prim="cube"     title="添加立方体">    <span class="prim-tile-icon">▣</span><span class="prim-tile-name">立方体</span></button>
+      <button type="button" class="prim-tile" data-prim="sphere"   title="添加球体">      <span class="prim-tile-icon">●</span><span class="prim-tile-name">球体</span></button>
+      <button type="button" class="prim-tile" data-prim="cylinder" title="添加圆柱体">    <span class="prim-tile-icon">⬗</span><span class="prim-tile-name">圆柱</span></button>
+      <button type="button" class="prim-tile" data-prim="cone"     title="添加圆锥">      <span class="prim-tile-icon">▲</span><span class="prim-tile-name">圆锥</span></button>
+      <button type="button" class="prim-tile" data-prim="prism"    title="添加棱柱">      <span class="prim-tile-icon">⬢</span><span class="prim-tile-name">棱柱</span></button>
+      <button type="button" class="prim-tile" data-prim="torus"    title="添加圆环">      <span class="prim-tile-icon">◯</span><span class="prim-tile-name">圆环</span></button>
+    </div>
+
+    <div class="lib-category-label">进阶形状</div>
+    <div class="prim-tiles">
+      <button type="button" class="prim-tile" data-prim="pyramid"    title="添加金字塔">    <span class="prim-tile-icon">△</span><span class="prim-tile-name">金字塔</span></button>
+      <button type="button" class="prim-tile" data-prim="hemisphere" title="添加半球">      <span class="prim-tile-icon">◐</span><span class="prim-tile-name">半球</span></button>
+      <button type="button" class="prim-tile" data-prim="tube"       title="添加管道">      <span class="prim-tile-icon">◎</span><span class="prim-tile-name">管道</span></button>
+      <button type="button" class="prim-tile" data-prim="capsule"    title="添加胶囊体">    <span class="prim-tile-icon">⬭</span><span class="prim-tile-name">胶囊</span></button>
+      <button type="button" class="prim-tile" data-prim="wedge"      title="添加楔形">      <span class="prim-tile-icon">◣</span><span class="prim-tile-name">楔形</span></button>
+      <button type="button" class="prim-tile" data-prim="star"       title="添加星形">      <span class="prim-tile-icon">★</span><span class="prim-tile-name">星形</span></button>
+      <button type="button" class="prim-tile" data-prim="bowl"       title="添加碗形">      <span class="prim-tile-icon">◡</span><span class="prim-tile-name">碗</span></button>
+      <button type="button" class="prim-tile" data-prim="disc"       title="添加圆盘">      <span class="prim-tile-icon">◉</span><span class="prim-tile-name">圆盘</span></button>
+    </div>
+
+    <div class="lib-category-label">二维切片</div>
+    <div class="prim-tiles">
+      <button type="button" class="prim-tile" data-group="polygon" id="polygonGroupBtn" aria-expanded="false" title="多边形族 — 选择二维形状（薄片）">
+        <span class="prim-tile-icon">⬟</span><span class="prim-tile-name">多边形</span>
+      </button>
+    </div>
+    <div class="prim-subtiles" id="polygonSubtiles" hidden>
+      <div class="prim-subtiles-title">选择多边形类型</div>
+      <div class="prim-tiles">
+        <button type="button" class="prim-tile" data-shape="rectangle" title="添加矩形薄片"><span class="prim-tile-icon">▢</span><span class="prim-tile-name">矩形</span></button>
+        <button type="button" class="prim-tile" data-shape="circle"    title="添加圆形薄片"><span class="prim-tile-icon">○</span><span class="prim-tile-name">圆形</span></button>
+        <button type="button" class="prim-tile" data-shape="triangle"  title="添加三角形薄片"><span class="prim-tile-icon">△</span><span class="prim-tile-name">三角形</span></button>
+        <button type="button" class="prim-tile" data-shape="polygon"   title="添加自由多边形（可在2D中拖动顶点）"><span class="prim-tile-icon">✎</span><span class="prim-tile-name">自由绘制</span></button>
+      </div>
     </div>
     <div class="action-row">
-      <button type="button" id="enable3DBtn" class="primary-btn">Show 3D View</button>
+      <button type="button" id="clearCodeBtn" title="清空代码区">清空代码</button>
+    </div>
+  </section>
+
+  <section class="panel-section" id="selectionPanel" hidden>
+    <h3>已选: <span id="selName">—</span>
+      <button type="button" id="selDeselectBtn" class="x-btn" title="取消选择 (Esc)">×</button>
+    </h3>
+    <div id="primParams" class="prim-params-block" hidden>
+      <div class="prim-params-title">形状参数</div>
+      <div id="primParamsGrid" class="prim-params-grid"></div>
     </div>
     <div class="action-row">
-      <button type="button" id="fullscreen3DBtn" title="Maximize 3D viewport (hides 2D)" disabled>Fullscreen 3D</button>
+      <button type="button" class="gizmo-mode-btn active" data-gizmo-mode="translate" title="移动 (G)">移动</button>
+      <button type="button" class="gizmo-mode-btn" data-gizmo-mode="rotate" title="旋转 (B)">旋转</button>
+      <button type="button" class="gizmo-mode-btn" data-gizmo-mode="scale" title="缩放 (N)">缩放</button>
     </div>
     <div class="action-row">
-      <label>Mode
-        <select id="extrudeMode">
-          <option value="linear">Linear extrude</option>
-          <option value="rotate">Rotate extrude</option>
-        </select>
+      <label>X <input type="number" id="selPosX" step="1" value="0"></label>
+      <label>Y <input type="number" id="selPosY" step="1" value="0"></label>
+      <label>Z <input type="number" id="selPosZ" step="1" value="0"></label>
+    </div>
+    <div class="action-row">
+      <label>旋X° <input type="number" id="selRotX" step="15" value="0"></label>
+      <label>旋Y° <input type="number" id="selRotY" step="15" value="0"></label>
+      <label>旋Z° <input type="number" id="selRotZ" step="15" value="0"></label>
+    </div>
+    <div class="action-row">
+      <label>缩X <input type="number" id="selSclX" step="0.1" value="1" min="0.01"></label>
+      <label>缩Y <input type="number" id="selSclY" step="0.1" value="1" min="0.01"></label>
+      <label>缩Z <input type="number" id="selSclZ" step="0.1" value="1" min="0.01"></label>
+    </div>
+    <div class="action-row">
+      <button type="button" id="selUniformScaleBtn" title="统一XYZ缩放">等比缩放</button>
+      <button type="button" id="selResetBtn" title="重置变换">重置</button>
+    </div>
+    <div class="action-row">
+      <label class="color-row">颜色
+        <input type="color" id="selColor" value="#f2b154">
+        <button type="button" id="selColorReset" class="x-btn" title="重置为默认颜色">↺</button>
       </label>
     </div>
-    <div id="linearControls">
-      <div class="action-row">
-        <label>Height <input type="number" id="extrudeHeight" min="0.1" step="0.5" value="10" style="width: 60px"></label>
-      </div>
-      <div class="action-row">
-        <label>Twist <input type="number" id="extrudeTwist" step="5" value="0" style="width: 60px"></label>
-        <label>Scale <input type="number" id="extrudeScale" min="0.01" step="0.1" value="1" style="width: 60px"></label>
-      </div>
-    </div>
-    <div id="rotateControls" hidden>
-      <div class="action-row">
-        <label>Segments <input type="number" id="extrudeSegments" min="3" step="1" value="64" style="width: 60px"></label>
-      </div>
-      <div class="action-row">
-        <label>Angle <input type="number" id="extrudeAngle" min="1" max="360" step="5" value="360" style="width: 60px"></label>
-      </div>
-    </div>
     <div class="action-row">
-      <button type="button" id="resetCameraBtn" title="Reset camera">Reset View</button>
-      <button type="button" id="copy3DBtn" title="Copy 3D OpenSCAD code">Copy 3D</button>
+      <button type="button" id="selApplyBtn" class="primary-btn">应用到代码</button>
+      <button type="button" id="selDeleteBtn" title="从代码中删除">删除</button>
     </div>
   </section>
 
   <section class="panel-section">
-    <h3>Paths</h3>
-    <select size="6" id="pathListbox">
-      <option>[New]</option>
-    </select>
+    <h3>操作</h3>
+    <div class="action-row">
+      <button type="button" id="ast3dUndoBtn" disabled title="撤销 (Ctrl+Z)">撤销</button>
+      <button type="button" id="ast3dRedoBtn" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
+      <button type="button" id="resetCameraBtn" title="重置视角">重置视角</button>
+    </div>
   </section>
 
+  <!-- pathListbox still kept (hidden) — osped.js uses it for path bookkeeping -->
+  <select id="pathListbox" hidden style="display:none"><option>[New]</option></select>
+
   <section class="panel-section">
-    <h3>OpenSCAD code</h3>
+    <h3>OpenSCAD 代码</h3>
     <textarea id="exportArea" spellcheck="false" placeholder="polygon([[0,0],[10,0],[10,10]]);"></textarea>
     <div class="action-row">
-      <button type="button" id="copyBtn" title="Copy code to clipboard">Copy</button>
-      <button type="button" id="clearBtn" title="Clear all paths">Clear</button>
+      <button type="button" id="copyBtn" title="复制代码到剪贴板">复制</button>
+      <button type="button" id="clearBtn" title="清空所有">清空</button>
     </div>
   </section>
 </aside>
 
 <main id="wrapper">
   <img id="traceImage" alt="">
-  <div id="drawAreaSource"></div>
-  <div id="viewport3d" hidden>
-    <div id="viewport3dHint">Draw a polygon (Add tool · A) to see the 3D preview</div>
-    <div id="viewport3dDebug">3D ready</div>
+  <div id="drawAreaSource">
+    <div id="editingBadge" hidden>编辑切片 <span id="editingBadgeIdx">1</span></div>
+  </div>
+  <div id="viewport3d">
+    <div id="viewport3dHint">点击左侧形状库添加3D物体</div>
+    <div id="viewport3dDebug">3D 就绪</div>
   </div>
   <div id="statusBar">
     <span id="cursorCoordinates">x = 0, y = 0</span>
     <span id="zoomIndicator">100%</span>
-    <span id="viewport3dStatus" hidden>Drag to orbit · Scroll to zoom · Right-drag to pan</span>
-    <a href="https://github.com/daid/OpenSCAD-polygon-editor" target="_blank" rel="noopener">source</a>
+    <span id="viewport3dStatus" hidden>拖动旋转 · 滚轮缩放 · 右键平移</span>
+    <a href="https://github.com/daid/OpenSCAD-polygon-editor" target="_blank" rel="noopener">源码</a>
   </div>
 </main>
 

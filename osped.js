@@ -26,6 +26,14 @@
   let tools = {};
 
   const changeListeners = [];
+  const pathSelectListeners = [];
+  let suppressPathSelectEmit = false;
+  function emitPathSelected(idx) {
+    if (suppressPathSelectEmit) return;
+    for (const fn of pathSelectListeners) {
+      try { fn(idx); } catch (e) { console.error(e); }
+    }
+  }
   window.OspedAPI = {
     getPaths: () =>
       state.paths.map((p) => ({
@@ -50,7 +58,43 @@
     onChange: (fn) => { changeListeners.push(fn); },
     forceRefresh: () => emitPathsChanged(),
     resize2D: () => handleResize(),
+    selectPath: (idx, opts = {}) => {
+      const lb = document.querySelector('#pathListbox');
+      if (!lb) return;
+      const maxPolyIdx = lb.options.length - 1; // last entry is [New]
+      if (idx < 0 || idx >= maxPolyIdx) return;
+      if (opts.silent) suppressPathSelectEmit = true;
+      // Always update selectedIndex + dispatch change so the change handler
+      // re-creates vertex boxes (needed when the 2D area was previously hidden).
+      lb.selectedIndex = idx;
+      lb.dispatchEvent(new Event('change'));
+      suppressPathSelectEmit = false;
+      if (opts.activateEdit !== false) {
+        const editBtn = document.querySelector('#editToolSource');
+        if (editBtn) editBtn.click();
+      }
+      updateEditingBadge(idx);
+    },
+    refresh: () => {
+      handleResize();
+    },
+    onPathSelected: (fn) => { pathSelectListeners.push(fn); },
+    getCurrentPathIndex: () => state.currentPath,
   };
+  function updateEditingBadge(idx) {
+    const badge = document.querySelector('#editingBadge');
+    const badgeIdx = document.querySelector('#editingBadgeIdx');
+    if (!badge || !badgeIdx) return;
+    const lb = document.querySelector('#pathListbox');
+    if (!lb) return;
+    const maxPolyIdx = lb.options.length - 1;
+    if (idx >= 0 && idx < maxPolyIdx) {
+      badgeIdx.textContent = String(idx + 1);
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  }
   function emitPathsChanged() {
     for (const fn of changeListeners) {
       try { fn(); } catch (e) { console.error(e); }
@@ -78,8 +122,11 @@
 
   function setupDrawArea() {
     const das = $('#drawAreaSource');
-    drawWidth = das.clientWidth;
-    drawHeight = das.clientHeight;
+    // Fallback to a sensible default if the area is hidden (display:none).
+    // The Raphael paper needs a non-zero canvas — handleResize() resizes it
+    // properly once the area becomes visible.
+    drawWidth = das.clientWidth || 500;
+    drawHeight = das.clientHeight || 500;
 
     const unit = state.gridSize * state.subGridSize * 2;
     drawWidth -= drawWidth % unit;
@@ -135,6 +182,9 @@
   function handleResize() {
     // Recalculate sizing and redraw everything (Raphael needs a fresh canvas)
     const das = $('#drawAreaSource');
+    // If the 2D area is hidden the clientWidth will be 0 — skip rather than
+    // shrink the canvas to a single pixel.
+    if (!das || das.clientWidth === 0 || das.offsetParent === null) return;
     drawWidth = das.clientWidth;
     drawHeight = das.clientHeight;
     const unit = state.gridSize * state.subGridSize * 2;
@@ -170,30 +220,35 @@
 
   // ---------- Tools ----------
 
+  function safeMake(id, fn) {
+    if (!document.getElementById(id)) return null;
+    try { return fn(); } catch (e) { console.warn('[osped] setup', id, e); return null; }
+  }
+
   function setupTools() {
-    tools.edit = makeTool('editToolSource', 'M8,3L8,20L12,17L14,23L18,20L15,15L18,13Z', '#9ca3af');
-    tools.add = makeTool('addToolSource', 'M10,2L14,2L14,10L22,10L22,14L14,14L14,22L10,22L10,14L2,14L2,10L10,10Z', '#22c55e');
-    tools.rem = makeTool('remToolSource', 'M22,10L22,14L2,14L2,10Z', '#ef4444');
-    tools.img = makeImageTool('imgToolSource');
+    tools.edit = safeMake('editToolSource', () => makeTool('editToolSource', 'M8,3L8,20L12,17L14,23L18,20L15,15L18,13Z', '#9ca3af'));
+    tools.add  = safeMake('addToolSource',  () => makeTool('addToolSource', 'M10,2L14,2L14,10L22,10L22,14L14,14L14,22L10,22L10,14L2,14L2,10L10,10Z', '#22c55e'));
+    tools.rem  = safeMake('remToolSource',  () => makeTool('remToolSource', 'M22,10L22,14L2,14L2,10Z', '#ef4444'));
+    tools.img  = safeMake('imgToolSource',  () => makeImageTool('imgToolSource'));
 
-    $('#editToolSource').addEventListener('click', () => setSelectedTool(tools.edit));
-    $('#addToolSource').addEventListener('click', () => setSelectedTool(tools.add));
-    $('#remToolSource').addEventListener('click', () => setSelectedTool(tools.rem));
-    $('#imgToolSource').addEventListener('click', () => setSelectedTool(tools.img));
+    document.getElementById('editToolSource')?.addEventListener('click', () => setSelectedTool(tools.edit));
+    document.getElementById('addToolSource')?.addEventListener('click',  () => setSelectedTool(tools.add));
+    document.getElementById('remToolSource')?.addEventListener('click',  () => setSelectedTool(tools.rem));
+    document.getElementById('imgToolSource')?.addEventListener('click',  () => setSelectedTool(tools.img));
 
-    makeIcon('editToolCorner', (p) => {
+    safeMake('editToolCorner', () => makeIcon('editToolCorner', (p) => {
       p.path('M3,14L18,18L14,3').attr('stroke', getCSSVar('--text'));
       p.rect(15, 15, 6, 6).attr('stroke', getCSSVar('--text'));
-    });
-    makeIcon('editToolSmooth', (p) => {
+    }));
+    safeMake('editToolSmooth', () => makeIcon('editToolSmooth', (p) => {
       p.path('M1,12C16,22 22,16 12,1').attr('stroke', getCSSVar('--text'));
       p.rect(13, 13, 6, 6).attr('stroke', getCSSVar('--text'));
       p.path('M21,11L11,21').attr('stroke', getCSSVar('--text'));
       p.rect(8, 18, 6, 6).attr('stroke', getCSSVar('--text'));
       p.rect(18, 8, 6, 6).attr('stroke', getCSSVar('--text'));
-    });
+    }));
 
-    $('#editToolCorner').addEventListener('click', () => {
+    document.getElementById('editToolCorner')?.addEventListener('click', () => {
       if (state.selectedIdx < 0) return;
       pushHistory();
       const p = state.paths[state.currentPath].points[state.selectedIdx];
@@ -205,7 +260,7 @@
       updateExport();
     });
 
-    $('#editToolSmooth').addEventListener('click', () => {
+    document.getElementById('editToolSmooth')?.addEventListener('click', () => {
       if (state.selectedIdx < 0) return;
       pushHistory();
       const p = state.paths[state.currentPath].points[state.selectedIdx];
@@ -241,11 +296,14 @@
 
   function setSelectedTool(tool) {
     for (const t of Object.values(tools)) {
+      if (!t || !t.canvas) continue;
       const node = t.canvas.parentNode;
       if (node) node.classList.remove('active');
     }
     const entry = Object.entries(tools).find(([, v]) => v === tool);
-    if (entry) entry[1].canvas.parentNode.classList.add('active');
+    if (entry && entry[1] && entry[1].canvas && entry[1].canvas.parentNode) {
+      entry[1].canvas.parentNode.classList.add('active');
+    }
     state.currentTool = tool;
     state.selectedIdx = -1;
     showSelectedCP();
@@ -279,6 +337,8 @@
         }
         cur.path.attr('stroke-width', 3);
       }
+      updateEditingBadge(state.currentPath);
+      emitPathSelected(state.currentPath);
     });
 
     // Export area — use input event so paste also triggers
@@ -297,7 +357,7 @@
         const file = e.target.files[0];
         if (!file) return;
         if (!/^image\//.test(file.type)) {
-          alert('You must select a valid image file!');
+          alert('请选择有效的图片文件！');
           return;
         }
         reader.readAsDataURL(file);
@@ -341,15 +401,15 @@
       const text = $('#exportArea').value;
       try {
         await navigator.clipboard.writeText(text);
-        flashButton('#copyBtn', 'Copied!');
+        flashButton('#copyBtn', '已复制!');
       } catch {
         $('#exportArea').select();
         document.execCommand('copy');
-        flashButton('#copyBtn', 'Copied!');
+        flashButton('#copyBtn', '已复制!');
       }
     });
     $('#clearBtn').addEventListener('click', () => {
-      if (!confirm('Clear all paths?')) return;
+      if (!confirm('确定清空所有路径吗？')) return;
       pushHistory();
       clearAllPaths();
       $('#exportArea').value = '';
@@ -365,26 +425,7 @@
   }
 
   function setupDraggablePanel() {
-    const panel = $('#toolbox');
-    const handle = panel.querySelector('[data-drag-handle]');
-    let dragX = 0, dragY = 0, dragging = false;
-
-    handle.addEventListener('mousedown', (e) => {
-      if (e.target.closest('button')) return;
-      dragging = true;
-      dragX = e.pageX;
-      dragY = e.pageY;
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (!dragging) return;
-      const r = panel.getBoundingClientRect();
-      panel.style.left = (r.left + (e.pageX - dragX)) + 'px';
-      panel.style.top = (r.top + (e.pageY - dragY)) + 'px';
-      dragX = e.pageX;
-      dragY = e.pageY;
-    });
-    document.addEventListener('mouseup', () => { dragging = false; });
+    // Panel is now docked — no dragging.
   }
 
   function updateTraceImageSize() {
@@ -643,7 +684,7 @@
         const newOpt = document.createElement('option');
         newOpt.textContent = '[New]';
         $('#pathListbox').appendChild(newOpt);
-        state.paths[state.currentPath] = { points: [], prefix: 'polygon(', postfix: ');\n' };
+        state.paths[state.currentPath] = { points: [], prefix: 'linear_extrude(height=1) polygon(', postfix: ');\n' };
       }
       const box = makeBox(g.x, g.y);
       state.paths[state.currentPath].points.push({
@@ -849,13 +890,17 @@
       const mod = e.ctrlKey || e.metaKey;
 
       if (mod && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undo();
+        if (document.body.classList.contains('slice-selected')) {
+          e.preventDefault();
+          undo();
+        }
         return;
       }
       if (mod && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
-        e.preventDefault();
-        redo();
+        if (document.body.classList.contains('slice-selected')) {
+          e.preventDefault();
+          redo();
+        }
         return;
       }
 
