@@ -10,7 +10,19 @@ Original project: https://github.com/daid/OpenSCAD-polygon-editor
 
 Usage
 -----
-Open `index.html` in any modern browser. No build step or server needed.
+Recommended (full feature set, including overwrite-in-place save):
+
+    cd OpenSCAD-polygon-editor
+    python3 -m http.server 8000
+    # then open http://localhost:8000/index.html in Chrome / Edge
+
+Quick peek only:
+
+    open index.html directly (file://) — the page still works, BUT the
+    File System Access API is disabled on file:// (browser security
+    requirement), so "保存" will download a new copy instead of overwriting
+    the bound .oscad file. The project panel surfaces a red warning in
+    that case. Use the http://localhost path for real work.
 
 Tools
 -----
@@ -52,10 +64,64 @@ Two extrusion modes:
 "Copy 3D" copies generated `linear_extrude(...) polygon([...])` or
 `rotate_extrude(...) polygon([...])` code, ready to paste into OpenSCAD.
 
+Project storage
+---------------
+Each project is one self-contained `.oscad` file (JSON, schema `oscad-v1`)
+containing name, OpenSCAD code, saved components, and timestamps. The
+project panel exposes 5 file actions in two rows:
+
+  Primary (working-file ops):
+    打开…       open a .oscad and bind it as the working file
+    保存         overwrite the bound file; if none, behaves like 另存为…
+    另存为…     write to a new .oscad and re-bind to it
+
+  Secondary (lifecycle + snapshot):
+    重命名       rename in-app only (disk filename unchanged)
+    关闭         drop from the project list (disk file untouched)
+    下载副本     download a standalone .oscad copy — does NOT touch the
+                 current working-file binding (use for share/backup)
+
+The Save button lights up (accent color) whenever the project has unsaved
+changes so it's obvious there's work to flush. Chrome / Edge use the File
+System Access API for real overwrite-in-place. Safari / Firefox fall back
+to download / file-input — Save remembers the last filename in
+localStorage and re-downloads under the same name. localStorage is the
+always-on snapshot for offline reload regardless of browser.
+
+Export OBJ
+----------
+"导出 OBJ" in the 操作 panel saves the current scene as a triangulated
+Wavefront `.obj` file (vertices, normals, faces — no materials / colors).
+Viewport helpers (grid, axes, selection box, gizmo, wire-edges) are hidden
+during export and restored immediately after.
+
+Flip
+----
+With one object selected, "翻转 X / Y / Z" wraps it with an outer
+`mirror([...])`. Click the same axis a second time to un-flip (toggle).
+Flips participate in the AST undo/redo history.
+
+Quick Align
+-----------
+With exactly two objects multi-selected (A first, B second), open
+"快速对齐 ▾" to dock B onto one of A's six faces (+X / -X / +Y / -Y /
++Z / -Z) in one of three modes: 中心 (centers aligned), 边(min) (lowest
+edges aligned), 边(max) (highest edges aligned). The algorithm uses
+axis-aligned world bounding boxes (AABB) and writes the result as a
+single outer `translate([...])` wrapping B; repeated applies accumulate
+into that translate rather than nesting.
+
+  Known limitation: AABBs of rotated bodies are larger than the body
+  itself, so dock contact for non-axis-aligned objects may visually
+  appear loose. Rotate the body into axis-alignment first if you need
+  tight contact.
+
 Dependencies
 ------------
-- Raphael 2.3.0 — CDN, for 2D SVG.
-- Three.js 0.160 + OrbitControls — CDN ES modules via importmap, for 3D.
+- Raphael 2.3.0 — vendored under `vendor/raphael.min.js` (no CDN).
+- Three.js 0.160 + OrbitControls + TransformControls + OBJExporter —
+  vendored under `vendor/three/` via importmap (no CDN). Page works
+  fully offline.
 - No jQuery; everything else is vanilla JS / standard browser APIs.
 
 File overview
@@ -64,3 +130,7 @@ File overview
 - style.css  — modern theme (CSS variables, light/dark)
 - osped.js   — 2D polygon editor logic + OspedAPI bridge
 - three3d.js — 3D viewport (ES module)
+- project.js — project + component management (.oscad single-file backend)
+- openscad.js — OpenSCAD-subset parser, evaluator, AST helpers
+- vendor/    — pinned third-party assets, no network needed
+- tests/     — Playwright e2e suite (npm test)

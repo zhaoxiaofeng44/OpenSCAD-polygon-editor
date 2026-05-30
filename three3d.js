@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import {
   parse, evaluate, assignIds, serializeAst,
   findById, findByPath, applyTransformsToNode,
   deleteById, combineByIds,
+  mirrorNodeById, addOuterTranslateById,
 } from './openscad.js';
 
 const $ = (s) => document.querySelector(s);
@@ -35,6 +37,9 @@ let suppressAutoSelectOnce = false;
 // multi-selection state (top-level astIndices)
 const multiSelected = new Set();
 const multiBoxes = []; // BoxHelpers for each multi-selected mesh
+
+// quick-align panel state
+const quickAlignState = { face: '+z', mode: 'center', expanded: false };
 
 // ---------- VDOM state ----------
 // currentAst is the in-memory source of truth. User edits modify it directly;
@@ -428,6 +433,75 @@ function frameToGeometry() {
   controls.update();
 }
 
+function exportObj() {
+  console.log('[3D] exportObj clicked. initialized=', initialized, 'meshGroup?', !!meshGroup);
+  if (initialized === 'failed') {
+    alert('导出 OBJ 失败：WebGL 初始化失败，3D 视口不可用。请到 chrome://gpu 检查硬件加速是否打开，或换用支持 WebGL 的浏览器。');
+    return;
+  }
+  if (initialized !== true || !meshGroup) {
+    alert('3D 视口尚未就绪，请等待加载完成后重试（左下角调试状态会显示"3D 就绪"或"meshes: N"）。');
+    return;
+  }
+  // Flush any pending textarea edits and force a synchronous mesh rebuild so
+  // the OBJ reflects the latest code (not the pre-debounce snapshot).
+  try { window.ProjectAPI?.flushPendingEdits?.(); } catch (err) { console.warn('[3D] flush before export', err); }
+  // If the AST changed but the rebuild was only scheduled (animation frame
+  // pending), run it now so meshGroup is up to date.
+  if (needsRebuild) {
+    needsRebuild = false;
+    try { doBuildMeshes(); } catch (err) { console.warn('[3D] forced rebuild before export', err); }
+  }
+
+  // Hide non-geometry helpers (edges/box/grid/axes/gizmo) so the OBJ contains
+  // only real model geometry. Restore visibility after export.
+  const hidden = [];
+  meshGroup.traverse((o) => {
+    if (o.isLineSegments || o.isLine || o.type === 'LineSegments' || o.type === 'Line') {
+      hidden.push(o); o.visible = false;
+    }
+  });
+  const helpers = [gridHelper, axesHelper, selectionBox, ...multiBoxes];
+  for (const h of helpers) if (h && h.visible) { hidden.push(h); h.visible = false; }
+  let gizmoHelper = null;
+  if (transformControls) {
+    gizmoHelper = transformControls.getHelper ? transformControls.getHelper() : transformControls;
+    if (gizmoHelper && gizmoHelper.visible) { hidden.push(gizmoHelper); gizmoHelper.visible = false; }
+  }
+
+  // Count meshes-with-real-geometry so an empty scene gives a clear error
+  // instead of a silent zero-byte download.
+  let realMeshCount = 0;
+  meshGroup.traverse((o) => { if (o.isMesh && o.geometry) realMeshCount++; });
+  console.log('[3D] exportObj: real mesh count =', realMeshCount);
+
+  let data;
+  try {
+    data = new OBJExporter().parse(meshGroup);
+  } catch (err) {
+    console.error('[3D] OBJExporter failed', err);
+    alert('导出 OBJ 失败：' + (err && err.message || err));
+    for (const h of hidden) h.visible = true;
+    return;
+  }
+  for (const h of hidden) h.visible = true;
+
+  if (!data || !data.length || realMeshCount === 0) {
+    alert('当前场景没有可导出的几何体。请从左侧「形状库」添加至少一个 3D 物体后再点「导出 OBJ」。');
+    return;
+  }
+  const projectName = (window.ProjectAPI?.getActive?.()?.name) || 'model';
+  const safeName = String(projectName).replace(/[\/\\:*?"<>|]/g, '_').slice(0, 80) || 'model';
+  const blob = new Blob([data], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${safeName}.obj`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+  console.log('[3D] exportObj: downloaded', a.download, '(' + data.length + ' chars)');
+}
+
 function resetCamera() {
   const box = new THREE.Box3().setFromObject(meshGroup);
   if (!box.isEmpty()) {
@@ -462,6 +536,7 @@ function wireControls() {
   $('#resetCameraBtn')?.addEventListener('click', () => initialized && resetCamera());
   $('#ast3dUndoBtn')?.addEventListener('click', undoAst);
   $('#ast3dRedoBtn')?.addEventListener('click', redoAst);
+  $('#exportObjBtn')?.addEventListener('click', exportObj);
 
   if (window.OspedAPI) {
     // VDOM-aware change handler:
@@ -648,6 +723,11 @@ function setupSelection(canvas) {
       b.addEventListener('click', () => setGizmoMode(b.dataset.gizmoMode));
     });
 
+    // Flip / mirror buttons
+    document.querySelectorAll('.flip-btn').forEach((b) => {
+      b.addEventListener('click', () => flipSelected(b.dataset.flipAxis));
+    });
+
     // Combine panel buttons
     document.querySelectorAll('#combinePanel .combine-grid button[data-op]').forEach((b) => {
       b.addEventListener('click', () => combineSelected(b.dataset.op));
@@ -657,14 +737,44 @@ function setupSelection(canvas) {
       selectMesh(null);
     });
 
+    // Quick-align panel
+    document.getElementById('quickAlignToggleBtn')?.addEventListener('click', () => {
+      quickAlignState.expanded = !quickAlignState.expanded;
+      const panel = document.getElementById('quickAlignPanel');
+      if (panel) panel.hidden = !quickAlignState.expanded;
+      const btn = document.getElementById('quickAlignToggleBtn');
+      if (btn) btn.textContent = quickAlignState.expanded ? '快速对齐 ▴' : '快速对齐 ▾';
+    });
+    document.querySelectorAll('.qa-face-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        quickAlignState.face = b.dataset.face;
+        document.querySelectorAll('.qa-face-btn').forEach((x) => {
+          x.classList.toggle('active', x.dataset.face === quickAlignState.face);
+        });
+      });
+    });
+    document.querySelectorAll('.qa-mode-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        quickAlignState.mode = b.dataset.mode;
+        document.querySelectorAll('.qa-mode-btn').forEach((x) => {
+          x.classList.toggle('active', x.dataset.mode === quickAlignState.mode);
+        });
+      });
+    });
+    document.getElementById('quickAlignApplyBtn')?.addEventListener('click', () => {
+      applyQuickAlign(quickAlignState.face, quickAlignState.mode);
+    });
+
     // Keyboard shortcuts inside 3D viewport (skip when typing in inputs)
     document.addEventListener('keydown', (e) => {
       const tag = (e.target && e.target.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && !document.body.classList.contains('slice-selected')) {
-        if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoAst(); return; }
-        if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redoAst(); return; }
+        // e.key is uppercase when Shift is held, so normalize.
+        const k = (e.key || '').toLowerCase();
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoAst(); return; }
+        if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redoAst(); return; }
       }
       if (mod || e.altKey) return;
       switch (e.key) {
@@ -1121,20 +1231,33 @@ function highlightTreeNode(astPathOrIndex) {
 // These also drive the inputs shown in the selection panel until the user
 // edits them.
 const PRIM_DEFAULTS = {
-  cube:       { x: 20, y: 20, z: 20, center: true },
-  sphere:     { r: 10, fn: 48 },
-  cylinder:   { h: 20, r1: 8, r2: 8, fn: 48, center: false },
-  cone:       { h: 20, r: 10, fn: 48 },
-  prism:      { sides: 6, r: 8, h: 12 },
-  torus:      { ringR: 12, tubeR: 3, fn: 48 },
-  pyramid:    { w: 20, h: 20 },
-  hemisphere: { r: 10, fn: 48 },
-  tube:       { h: 20, outR: 10, inR: 7, fn: 48 },
-  capsule:    { h: 16, r: 6, fn: 48 },
-  wedge:      { w: 20, d: 14, h: 10 },
-  star:       { points: 5, outR: 12, inR: 5, h: 4 },
-  bowl:       { r: 12, thickness: 2, fn: 48 },
-  disc:       { r: 14, h: 1.5, fn: 48 },
+  cube:        { x: 20, y: 20, z: 20, center: true },
+  sphere:      { r: 10, fn: 48 },
+  cylinder:    { h: 20, r1: 8, r2: 8, fn: 48, center: false },
+  cone:        { h: 20, r: 10, fn: 48 },
+  prism:       { sides: 6, r: 8, h: 12 },
+  torus:       { ringR: 12, tubeR: 3, fn: 48 },
+  ellipsoid:   { rx: 14, ry: 10, rz: 8, fn: 48 },
+  tetrahedron: { r: 12, h: 16 },
+  octahedron:  { w: 16, h: 12 },
+  frustum:     { h: 18, r1: 12, r2: 6, fn: 48 },
+  pyramid:     { w: 20, h: 20 },
+  hemisphere:  { r: 10, fn: 48 },
+  tube:        { h: 20, outR: 10, inR: 7, fn: 48 },
+  capsule:     { h: 16, r: 6, fn: 48 },
+  wedge:       { w: 20, d: 14, h: 10 },
+  star:        { points: 5, outR: 12, inR: 5, h: 4 },
+  bowl:        { r: 12, thickness: 2, fn: 48 },
+  disc:        { r: 14, h: 1.5, fn: 48 },
+  spring:      { h: 30, r: 8, tubeR: 1.2, turns: 5, fn: 24 },
+  lshape:      { w: 22, d: 22, h: 8, cw: 6, cd: 6 },
+  tshape:      { w: 24, d: 20, t: 6, h: 8 },
+  cross:       { w: 24, t: 6, h: 8 },
+  stairs:      { steps: 4, w: 8, d: 14, h: 4 },
+  nut:         { h: 6, outR: 8, holeR: 3 },
+  arrow:       { w: 28, h: 16, t: 4 },
+  heart:       { size: 14, h: 4 },
+  crescent:    { r: 12, offset: 5, h: 3, fn: 48 },
 };
 const SHAPE_DEFAULTS = {
   rectangle: { w: 20, h: 20, h3: 1 },
@@ -1179,11 +1302,17 @@ function makePrimSnippet(kind, params) {
   }
   if (kind === 'hemisphere') {
     const r = p.r;
-    const s = r + 1;
-    return `difference() { sphere(r=${r}, $fn=${p.fn}); translate([${-s}, ${-s}, ${-s}]) cube([${s*2}, ${s*2}, ${s}]); }`;
+    const n = Math.max(16, Math.round(p.fn / 2));
+    const pts = ['[0,0]', `[${r},0]`];
+    for (let i = 1; i <= n; i++) {
+      const a = (i / n) * (Math.PI / 2);
+      pts.push(`[${(r * Math.cos(a)).toFixed(3)},${(r * Math.sin(a)).toFixed(3)}]`);
+    }
+    return `rotate_extrude($fn=${p.fn}) polygon([${pts.join(',')}]);`;
   }
   if (kind === 'tube') {
-    return `difference() { cylinder(h=${p.h}, r=${p.outR}, $fn=${p.fn}); translate([0, 0, -0.5]) cylinder(h=${p.h + 1}, r=${p.inR}, $fn=${p.fn}); }`;
+    const wall = Math.max(0.1, p.outR - p.inR);
+    return `rotate_extrude($fn=${p.fn}) translate([${p.inR}, 0]) square([${wall}, ${p.h}]);`;
   }
   if (kind === 'capsule') {
     return `union() { cylinder(h=${p.h}, r=${p.r}, $fn=${p.fn}); sphere(r=${p.r}, $fn=${p.fn}); translate([0, 0, ${p.h}]) sphere(r=${p.r}, $fn=${p.fn}); }`;
@@ -1196,13 +1325,91 @@ function makePrimSnippet(kind, params) {
     return `linear_extrude(height=${p.h}) polygon([${pts}]);`;
   }
   if (kind === 'bowl') {
-    const r = p.r;
-    const inner = r - p.thickness;
-    const s = r + 1;
-    return `difference() { sphere(r=${r}, $fn=${p.fn}); sphere(r=${inner}, $fn=${p.fn}); translate([${-s}, ${-s}, 0]) cube([${s*2}, ${s*2}, ${s}]); }`;
+    const R = p.r;
+    const t = Math.max(0.1, p.thickness);
+    const rIn = Math.max(0.1, R - t);
+    const n = Math.max(16, Math.round(p.fn / 2));
+    const pts = [];
+    // Cross-section (revolved around Z): traces bowl wall in XY plane
+    // Start at outer rim, go down outer arc, across bottom, up inner arc, across rim.
+    pts.push(`[${R},0]`);
+    for (let i = 1; i <= n; i++) {
+      const a = (i / n) * (Math.PI / 2);
+      pts.push(`[${(R * Math.cos(a)).toFixed(3)},${(-R * Math.sin(a)).toFixed(3)}]`);
+    }
+    for (let i = n; i >= 0; i--) {
+      const a = (i / n) * (Math.PI / 2);
+      pts.push(`[${(rIn * Math.cos(a)).toFixed(3)},${(-rIn * Math.sin(a)).toFixed(3)}]`);
+    }
+    return `rotate_extrude($fn=${p.fn}) polygon([${pts.join(',')}]);`;
   }
   if (kind === 'disc') {
     return `cylinder(h=${p.h}, r=${p.r}, $fn=${p.fn});`;
+  }
+  if (kind === 'ellipsoid') {
+    return `scale([${p.rx}, ${p.ry}, ${p.rz}]) sphere(r=1, $fn=${p.fn});`;
+  }
+  if (kind === 'tetrahedron') {
+    const a = p.r;
+    const x = (a * 0.866).toFixed(2);
+    const yLow = (-a * 0.5).toFixed(2);
+    return `linear_extrude(height=${p.h}, scale=0) polygon([[${-x}, ${yLow}], [${x}, ${yLow}], [0, ${a}]]);`;
+  }
+  if (kind === 'octahedron') {
+    return `union() { linear_extrude(height=${p.h}, scale=0) square([${p.w}, ${p.w}], center=true); mirror([0, 0, 1]) linear_extrude(height=${p.h}, scale=0) square([${p.w}, ${p.w}], center=true); }`;
+  }
+  if (kind === 'frustum') {
+    return `cylinder(h=${p.h}, r1=${p.r1}, r2=${p.r2}, $fn=${p.fn});`;
+  }
+  if (kind === 'spring') {
+    return `linear_extrude(height=${p.h}, twist=${p.turns * 360}, $fn=${p.fn}) translate([${p.r}, 0]) circle(r=${p.tubeR}, $fn=16);`;
+  }
+  if (kind === 'lshape') {
+    const armX = Math.max(1, p.cw);
+    const armY = Math.max(1, p.cd);
+    return `union() { cube([${p.w}, ${armY}, ${p.h}]); cube([${armX}, ${p.d}, ${p.h}]); }`;
+  }
+  if (kind === 'tshape') {
+    const offY = (p.d / 2 - p.t / 2).toFixed(2);
+    return `union() { cube([${p.w}, ${p.t}, ${p.h}], center=true); translate([0, ${offY}, 0]) cube([${p.t}, ${p.d}, ${p.h}], center=true); }`;
+  }
+  if (kind === 'cross') {
+    return `union() { cube([${p.w}, ${p.t}, ${p.h}], center=true); cube([${p.t}, ${p.w}, ${p.h}], center=true); }`;
+  }
+  if (kind === 'stairs') {
+    const steps = Math.max(2, p.steps | 0 || 4);
+    const parts = [];
+    for (let i = 0; i < steps; i++) {
+      parts.push(`translate([${(i * p.w).toFixed(2)}, 0, ${(i * p.h).toFixed(2)}]) cube([${p.w}, ${p.d}, ${p.h}])`);
+    }
+    return `union() { ${parts.join('; ')}; }`;
+  }
+  if (kind === 'nut') {
+    return `difference() { cylinder(h=${p.h}, r=${p.outR}, $fn=6); translate([0, 0, -0.5]) cylinder(h=${p.h + 1}, r=${p.holeR}, $fn=32); }`;
+  }
+  if (kind === 'arrow') {
+    const w = p.w, h = p.h;
+    const shaftW = (w * 0.6).toFixed(2);
+    const yA = (h * 0.3).toFixed(2);
+    const yB = (h * 0.7).toFixed(2);
+    const yMid = (h * 0.5).toFixed(2);
+    return `linear_extrude(height=${p.t}) polygon([[0, ${yA}], [${shaftW}, ${yA}], [${shaftW}, 0], [${w}, ${yMid}], [${shaftW}, ${h}], [${shaftW}, ${yB}], [0, ${yB}]]);`;
+  }
+  if (kind === 'heart') {
+    const pts = [];
+    const n = 40;
+    const s = p.size / 17;
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      const x = 16 * Math.pow(Math.sin(t), 3) * s;
+      const y = (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * s;
+      pts.push(`[${x.toFixed(2)},${y.toFixed(2)}]`);
+    }
+    return `linear_extrude(height=${p.h}) polygon([${pts.join(',')}]);`;
+  }
+  if (kind === 'crescent') {
+    const innerR = (p.r * 0.95).toFixed(2);
+    return `difference() { linear_extrude(height=${p.h}) circle(r=${p.r}, $fn=${p.fn}); translate([${p.offset}, 0, -0.5]) linear_extrude(height=${p.h + 1}) circle(r=${innerR}, $fn=${p.fn}); }`;
   }
   return null;
 }
@@ -1551,6 +1758,85 @@ function deleteSelectedFromCode() {
   commitVdomToTextarea(null, null);
 }
 
+function flipSelected(axis) {
+  if (!selectedObject) return;
+  const ud = selectedObject.userData;
+  if (!ud || !ud.vNodeId) return;
+  pushAstHistory();
+  const ast = ensureCurrentAst();
+  const newOuter = mirrorNodeById(ast, ud.vNodeId, axis);
+  if (!newOuter) return;
+  commitVdomToTextarea(newOuter.id, null);
+}
+
+// ---------- Quick Align ----------
+// face: '+x'|'-x'|'+y'|'-y'|'+z'|'-z'  — which face of A to dock B onto
+// mode: 'center' | 'min' | 'max'        — how to align in the plane orthogonal to that face
+function applyQuickAlign(face, mode) {
+  if (multiSelected.size !== 2) {
+    alert('请先在场景树或视口里多选 2 个物体（按住 ⌘/Ctrl 加选）。');
+    return;
+  }
+  const m = /^([+-])([xyz])$/i.exec(face || '');
+  if (!m) { alert('无效的参考面：' + face); return; }
+  const sign = m[1] === '-' ? -1 : 1;
+  const axis = m[2].toLowerCase();
+  const evalRoot = meshGroup && meshGroup.children[0];
+  if (!evalRoot) return;
+  const indices = Array.from(multiSelected).sort((a, b) => a - b);
+  const idxA = indices[0];
+  const idxB = indices[1];
+  const meshA = evalRoot.children[idxA];
+  const meshB = evalRoot.children[idxB];
+  if (!meshA || !meshB) { alert('无法定位选中的物体（场景已变化），请重新选择。'); return; }
+  const bId = meshB.userData?.vNodeId;
+  if (!bId) { alert('B 物体缺少 vNodeId，请重新选择。'); return; }
+
+  // Use axis-aligned world bounding boxes (limitation: if B is rotated, AABB
+  // may be larger than the visual hull — face contact will be approximate).
+  meshGroup.updateMatrixWorld(true);
+  const boxA = new THREE.Box3().setFromObject(meshA);
+  const boxB = new THREE.Box3().setFromObject(meshB);
+  if (boxA.isEmpty() || boxB.isEmpty()) {
+    alert('选中物体的包围盒为空，无法对齐。');
+    return;
+  }
+
+  const axes = ['x', 'y', 'z'];
+  const others = axes.filter((a) => a !== axis);
+
+  const planeA = sign > 0 ? boxA.max[axis] : boxA.min[axis];
+  const planeB = sign > 0 ? boxB.min[axis] : boxB.max[axis];
+  const delta = { x: 0, y: 0, z: 0 };
+  delta[axis] = planeA - planeB;
+
+  for (const a of others) {
+    if (mode === 'min') {
+      delta[a] = boxA.min[a] - boxB.min[a];
+    } else if (mode === 'max') {
+      delta[a] = boxA.max[a] - boxB.max[a];
+    } else {
+      // center
+      const cA = (boxA.min[a] + boxA.max[a]) / 2;
+      const cB = (boxB.min[a] + boxB.max[a]) / 2;
+      delta[a] = cA - cB;
+    }
+  }
+
+  pushAstHistory();
+  const ast = ensureCurrentAst();
+  const newOuter = addOuterTranslateById(ast, bId, delta);
+  if (!newOuter) {
+    alert('快速对齐失败：未找到目标节点。');
+    return;
+  }
+  // Preserve multi-selection after rebuild so the user can keep iterating.
+  // multiSelected indices are stable as long as we didn't reorder top-level
+  // nodes — which addOuterTranslateById doesn't. existing rebuild logic
+  // restores multiSelected when its size > 1, so just commit and let it run.
+  commitVdomToTextarea(null, null);
+}
+
 function applyTwistScale(geometry, height, twistDeg, scale) {
   const pos = geometry.attributes.position;
   const twistRad = (twistDeg * Math.PI) / 180;
@@ -1568,6 +1854,60 @@ function applyTwistScale(geometry, height, twistDeg, scale) {
   pos.needsUpdate = true;
   geometry.computeVertexNormals();
 }
+
+// ---------- AstAPI: expose current selection as OpenSCAD code ----------
+// Consumed by project.js (component library). Single selection serializes the
+// selected object's AST subtree; multi-selection serializes each top-level
+// selected node in document order.
+window.AstAPI = {
+  // Test-only: snapshot the visibility of viewport helpers. Tests assert
+  // these are all true AFTER exportObj() has finished restoring them.
+  _helpersVisible() {
+    return {
+      grid: !!(gridHelper && gridHelper.visible),
+      axes: !!(axesHelper && axesHelper.visible),
+      lines: (() => {
+        if (!meshGroup) return null;
+        let any = false, hidden = 0, total = 0;
+        meshGroup.traverse((o) => {
+          if (o.isLineSegments) { total++; if (!o.visible) hidden++; else any = true; }
+        });
+        return { total, hidden, anyVisible: any };
+      })(),
+    };
+  },
+  hasSelection() {
+    return multiSelected.size > 0 || !!selectedObject;
+  },
+  getSelectionLabel() {
+    if (multiSelected.size > 1) return `${multiSelected.size} 个对象`;
+    if (selectedObject?.userData?.label) return selectedObject.userData.label;
+    return '对象';
+  },
+  getSelectionCode() {
+    const nodes = [];
+    if (multiSelected.size > 0) {
+      const indices = Array.from(multiSelected).sort((a, b) => a - b);
+      for (const idx of indices) {
+        const n = currentAst[idx];
+        if (n) nodes.push(n);
+      }
+    } else if (selectedObject && selectedObject.userData?.astNode) {
+      nodes.push(selectedObject.userData.astNode);
+    }
+    if (!nodes.length) return null;
+    try {
+      return serializeAst(nodes);
+    } catch (err) {
+      console.error('[AstAPI] serialize failed', err);
+      return null;
+    }
+  },
+  clearSelection() {
+    if (typeof clearMultiSelection === 'function') clearMultiSelection();
+    selectMesh(null);
+  },
+};
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', wireControls);

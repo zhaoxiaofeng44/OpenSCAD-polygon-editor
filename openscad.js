@@ -143,6 +143,97 @@ export function combineByIds(ast, ids, op) {
   return wrapped;
 }
 
+// Wrap (or unwrap, if same-axis) a node with `mirror([1,0,0])` / [0,1,0] / [0,0,1].
+// Acts as a toggle: a second click on the same axis removes the outer mirror.
+// Returns the new outermost node so the caller can re-select it.
+export function mirrorNodeById(ast, id, axis /* 'x' | 'y' | 'z' */) {
+  const f = findById(ast, id);
+  if (!f) return null;
+  const axisVec = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }[axis];
+  if (!axisVec) return null;
+  const outer = f.node;
+  // Toggle: outermost is already `mirror(<same axis>)` with one child → unwrap.
+  if (
+    outer.name === 'mirror' &&
+    outer.children && outer.children.length === 1 &&
+    _isVec3Equal(outer.args, axisVec)
+  ) {
+    const inner = outer.children[0];
+    if (f.parent) f.parent.children[f.indexInParent] = inner;
+    else ast[f.indexInParent] = inner;
+    return inner;
+  }
+  // Otherwise wrap.
+  const wrapper = makeCallNode('mirror', {
+    positional: [{
+      type: 'array',
+      items: axisVec.map((n) => ({ type: 'number', value: n })),
+    }],
+    named: {},
+  }, [outer]);
+  if (f.parent) f.parent.children[f.indexInParent] = wrapper;
+  else ast[f.indexInParent] = wrapper;
+  return wrapper;
+}
+
+function _isVec3Equal(args, vec) {
+  if (!args) return false;
+  const v = (args.named && (args.named.v || args.named.vec)) || (args.positional && args.positional[0]);
+  if (!v || v.type !== 'array' || !v.items || v.items.length < 3) return false;
+  for (let i = 0; i < 3; i++) {
+    const item = v.items[i];
+    if (!item || item.type !== 'number') return false;
+    if (Math.round(item.value) !== vec[i]) return false;
+  }
+  return true;
+}
+
+// Add (or accumulate into the outermost) `translate([dx,dy,dz])` wrapping a node.
+// Used by Quick-Align: callers compute a world-space delta and we apply it as
+// the outermost wrapper. If the outermost already is `translate([...])`, we add
+// the delta into its existing vector rather than nesting another wrapper.
+// Returns the new outermost node.
+export function addOuterTranslateById(ast, id, delta) {
+  const f = findById(ast, id);
+  if (!f) return null;
+  const outer = f.node;
+  const [dx, dy, dz] = [delta.x || 0, delta.y || 0, delta.z || 0];
+  if (
+    outer.name === 'translate' &&
+    outer.children && outer.children.length === 1 &&
+    outer.args && outer.args.positional &&
+    outer.args.positional[0] && outer.args.positional[0].type === 'array'
+  ) {
+    const items = outer.args.positional[0].items;
+    const cx = (items[0] && items[0].type === 'number') ? items[0].value : 0;
+    const cy = (items[1] && items[1].type === 'number') ? items[1].value : 0;
+    const cz = (items[2] && items[2].type === 'number') ? items[2].value : 0;
+    outer.args.positional[0] = {
+      type: 'array',
+      items: [
+        { type: 'number', value: roundShort(cx + dx) },
+        { type: 'number', value: roundShort(cy + dy) },
+        { type: 'number', value: roundShort(cz + dz) },
+      ],
+    };
+    return outer;
+  }
+  const wrapper = makeCallNode('translate', {
+    positional: [{
+      type: 'array',
+      items: [
+        { type: 'number', value: roundShort(dx) },
+        { type: 'number', value: roundShort(dy) },
+        { type: 'number', value: roundShort(dz) },
+      ],
+    }],
+    named: {},
+  }, [outer]);
+  if (f.parent) f.parent.children[f.indexInParent] = wrapper;
+  else ast[f.indexInParent] = wrapper;
+  return wrapper;
+}
+
 // Apply transforms to a node. Strips its leading modifier chain in place and
 // re-wraps with translate/rotate/scale/color according to the supplied values.
 // Returns the new outermost node (what the caller should select afterwards).

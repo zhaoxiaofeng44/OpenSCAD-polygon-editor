@@ -1,0 +1,13 @@
+{
+  "name": "openscad-polygon-editor-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local e2e tests for the OpenSCAD polygon editor (not shipped to the browser).",
+  "scripts": {
+    "test": "playwright test",
+    "test:list": "playwright test --list"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

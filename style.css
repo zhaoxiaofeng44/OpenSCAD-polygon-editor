@@ -113,6 +113,22 @@ button:hover:not(:disabled) {
   border-color: #15803d;
 }
 
+/* Save button: when the active project has unsaved changes, light it up so
+   users get a clear "click me" signal instead of it blending into the panel.
+   Without this, in dark-theme the button background == panel background and
+   the only dirty hint is the ✱ in the storage label. */
+button.save-dirty:not(:disabled) {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+button.save-dirty:not(:disabled):hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+
 .prim-tiles {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -388,6 +404,54 @@ button:hover:not(:disabled) {
 .combine-grid button {
   font-size: 11px;
   padding: 5px 4px;
+}
+
+.quick-align-panel {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--panel-bg, var(--bg));
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.quick-align-panel .qa-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+.quick-align-panel .qa-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.quick-align-panel .qa-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.quick-align-panel .qa-faces {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+}
+.quick-align-panel .qa-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+}
+.quick-align-panel .qa-face-btn,
+.quick-align-panel .qa-mode-btn {
+  font-size: 11px;
+  padding: 4px 2px;
+}
+.quick-align-panel .qa-face-btn.active,
+.quick-align-panel .qa-mode-btn.active {
+  background: var(--accent);
+  color: var(--accent-text, #fff);
+  border-color: var(--accent);
 }
 
 /* ---------- Color picker row ---------- */
@@ -791,4 +855,231 @@ select::-webkit-scrollbar-thumb {
 
 .panel {
   overflow-y: auto;
+}
+
+/* ---------- Project + component panels ---------- */
+
+.project-setup-banner {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+.project-setup-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.project-setup-desc {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.project-setup-desc code {
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 4px;
+  background: var(--panel-bg);
+  border-radius: 3px;
+}
+.project-setup-banner .primary-btn {
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.project-storage-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  background: var(--bg);
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.project-storage-row .project-storage-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Loud warning state for the storage label — used when the page is opened
+   via file:// and FSA is therefore disabled. Wraps the multi-line message
+   so the user actually reads it. */
+.project-storage-label.storage-warning {
+  white-space: pre-line;
+  color: var(--danger);
+  font-weight: 500;
+}
+.project-storage-row:has(.storage-warning) {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: var(--danger);
+  border-style: solid;
+}
+.link-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  padding: 2px 6px;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-btn:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent-hover);
+}
+
+#projectSection .project-switcher {
+  align-items: stretch;
+}
+#projectSection .project-switcher select {
+  flex: 1;
+  min-width: 0;
+}
+#projectSection .project-switcher #projectNewBtn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* While no project is active, dim and disable everything below #projectSection
+   so the user is forced to create / pick a project first. */
+#toolbox[data-no-project] .panel-section:not(#projectSection) {
+  opacity: 0.35;
+  pointer-events: none;
+  filter: grayscale(0.4);
+}
+#toolbox[data-no-project] .panel-section#sceneTreeSection,
+#toolbox[data-no-project] .panel-section#componentSection {
+  /* still visually present but inert */
+}
+
+.component-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.component-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 6px 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.component-tab:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--panel-border);
+}
+.component-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.component-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.component-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+  background: var(--bg);
+}
+.component-row .component-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.component-row .insert-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.component-row .component-delete-btn {
+  padding: 2px 6px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+.component-row .component-delete-btn:hover:not(:disabled) {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+.component-empty {
+  padding: 8px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Empty-state overlay (no active project) ---------- */
+
+#projectEmptyOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  backdrop-filter: blur(2px);
+}
+.project-empty-card {
+  background: var(--panel-bg);
+  color: var(--text);
+  padding: 28px 32px;
+  border-radius: var(--radius);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+  max-width: 420px;
+  text-align: center;
+}
+.project-empty-card h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.project-empty-card p {
+  margin: 6px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.project-empty-card .project-empty-hint {
+  font-size: 11px;
+  margin-bottom: 18px;
+}
+.project-empty-card .primary-btn {
+  margin-top: 8px;
+  min-width: 140px;
+}
+
+.project-empty-card #projectEmptyMsg.project-empty-success {
+  color: var(--success);
+  font-weight: 600;
+  font-size: 14px;
 }

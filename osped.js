@@ -414,6 +414,7 @@
       clearAllPaths();
       $('#exportArea').value = '';
       state.oldExportStr = '';
+      $('#exportArea').dispatchEvent(new Event('input'));
     });
   }
 

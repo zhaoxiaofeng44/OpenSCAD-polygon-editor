@@ -3,14 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-store">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>OpenSCAD 3D 建模编辑器</title>
 <link rel="stylesheet" href="style.css">
-<script src="https://cdn.jsdelivr.net/npm/raphael@2.3.0/raphael.min.js"></script>
+<script src="vendor/raphael.min.js"></script>
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
   }
 }
 </script>
@@ -22,6 +25,40 @@
     <h2>场景</h2>
     <button type="button" id="themeToggle" class="icon-btn" title="切换深色模式" aria-label="切换深色模式">&#9788;</button>
   </header>
+
+  <section class="panel-section" id="projectSection">
+    <h3>项目 <span class="hint-text">当前: <span id="projectActiveName">—</span></span></h3>
+    <div class="project-storage-row">
+      <span class="project-storage-label" id="projectStorageLabel">…</span>
+    </div>
+    <div class="action-row project-switcher">
+      <select id="projectSelect" title="切换项目"></select>
+      <button type="button" id="projectNewBtn" title="新建一个临时项目（未保存）">+ 新建</button>
+    </div>
+    <div class="action-row">
+      <button type="button" id="projectOpenBtn"   title="打开磁盘上的 .oscad 并绑定为当前工作文件（之后「保存」会覆盖该文件）">打开…</button>
+      <button type="button" id="projectSaveBtn"   title="保存当前项目：若已绑定文件则覆盖原文件；否则等同于「另存为…」">保存</button>
+      <button type="button" id="projectSaveAsBtn" title="把当前项目写入一个新的 .oscad 文件，并把它设为工作文件">另存为…</button>
+    </div>
+    <div class="action-row">
+      <button type="button" id="projectRenameBtn" title="重命名当前项目（只改项目内部名称，不重命名磁盘文件；下次「另存为」可以同步换文件名）">重命名</button>
+      <button type="button" id="projectCloseBtn"  title="从项目列表里移除当前项目；磁盘上的 .oscad 文件不会被删除，可再用「打开…」载回">关闭</button>
+      <button type="button" id="projectExportBtn" title="下载一份 .oscad 副本到磁盘 —— 不影响当前工作文件的绑定，适合分享/备份">下载副本</button>
+      <input id="projectImportFile" type="file" accept=".oscad,.json,application/json" hidden>
+    </div>
+  </section>
+
+  <section class="panel-section" id="operationsSection">
+    <h3>操作</h3>
+    <div class="action-row">
+      <button type="button" id="ast3dUndoBtn" disabled title="撤销 (Ctrl+Z)">撤销</button>
+      <button type="button" id="ast3dRedoBtn" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
+      <button type="button" id="resetCameraBtn" title="重置视角">重置视角</button>
+    </div>
+    <div class="action-row">
+      <button type="button" id="exportObjBtn" title="把当前 3D 场景导出为 .obj 文件（顶点+法线+三角面，无材质/颜色）—— 适合送到 Blender / 3D 打印切片软件">导出 OBJ</button>
+    </div>
+  </section>
 
   <section class="panel-section" id="sceneTreeSection">
     <h3>场景树 <span class="hint-text">(⌘/Ctrl+点击 多选)</span></h3>
@@ -35,7 +72,33 @@
         <button type="button" data-op="hull" title="凸包">⌒ 凸包</button>
         <button type="button" data-op="minkowski" title="闵可夫斯基和">⊕ 闵和</button>
       </div>
+      <div id="quickAlignPanel" class="quick-align-panel" hidden>
+        <div class="qa-hint">仅 2 个物体且按顺序：A=锚定（先选），B=被移动（后选）。</div>
+        <div class="qa-row">
+          <span class="qa-label">A 的参考面</span>
+          <div class="qa-faces">
+            <button type="button" class="qa-face-btn" data-face="+x" title="贴到 A 的 +X 面">+X</button>
+            <button type="button" class="qa-face-btn" data-face="-x" title="贴到 A 的 -X 面">-X</button>
+            <button type="button" class="qa-face-btn" data-face="+y" title="贴到 A 的 +Y 面">+Y</button>
+            <button type="button" class="qa-face-btn" data-face="-y" title="贴到 A 的 -Y 面">-Y</button>
+            <button type="button" class="qa-face-btn active" data-face="+z" title="贴到 A 的 +Z 面（顶面）">+Z</button>
+            <button type="button" class="qa-face-btn" data-face="-z" title="贴到 A 的 -Z 面（底面）">-Z</button>
+          </div>
+        </div>
+        <div class="qa-row">
+          <span class="qa-label">对齐方式</span>
+          <div class="qa-modes">
+            <button type="button" class="qa-mode-btn active" data-mode="center" title="B 的对应反面与 A 该面贴合，且两者在该面内中心对齐">中心</button>
+            <button type="button" class="qa-mode-btn" data-mode="min" title="B 的对应反面与 A 该面贴合，且两者在该面内的 min 角对齐">边(min)</button>
+            <button type="button" class="qa-mode-btn" data-mode="max" title="B 的对应反面与 A 该面贴合，且两者在该面内的 max 角对齐">边(max)</button>
+          </div>
+        </div>
+        <div class="action-row">
+          <button type="button" id="quickAlignApplyBtn" class="primary-btn">应用对齐</button>
+        </div>
+      </div>
       <div class="action-row">
+        <button type="button" id="quickAlignToggleBtn" title="展开/折叠快速对齐">快速对齐 ▾</button>
         <button type="button" id="multiDeselectBtn">清除选择</button>
       </div>
     </div>
@@ -79,24 +142,45 @@
 
     <div class="lib-category-label">基础形状</div>
     <div class="prim-tiles">
-      <button type="button" class="prim-tile" data-prim="cube"     title="添加立方体">    <span class="prim-tile-icon">▣</span><span class="prim-tile-name">立方体</span></button>
-      <button type="button" class="prim-tile" data-prim="sphere"   title="添加球体">      <span class="prim-tile-icon">●</span><span class="prim-tile-name">球体</span></button>
-      <button type="button" class="prim-tile" data-prim="cylinder" title="添加圆柱体">    <span class="prim-tile-icon">⬗</span><span class="prim-tile-name">圆柱</span></button>
-      <button type="button" class="prim-tile" data-prim="cone"     title="添加圆锥">      <span class="prim-tile-icon">▲</span><span class="prim-tile-name">圆锥</span></button>
-      <button type="button" class="prim-tile" data-prim="prism"    title="添加棱柱">      <span class="prim-tile-icon">⬢</span><span class="prim-tile-name">棱柱</span></button>
-      <button type="button" class="prim-tile" data-prim="torus"    title="添加圆环">      <span class="prim-tile-icon">◯</span><span class="prim-tile-name">圆环</span></button>
+      <button type="button" class="prim-tile" data-prim="cube"        title="添加立方体">  <span class="prim-tile-icon">▣</span><span class="prim-tile-name">立方体</span></button>
+      <button type="button" class="prim-tile" data-prim="sphere"      title="添加球体">    <span class="prim-tile-icon">●</span><span class="prim-tile-name">球体</span></button>
+      <button type="button" class="prim-tile" data-prim="cylinder"    title="添加圆柱体">  <span class="prim-tile-icon">⬗</span><span class="prim-tile-name">圆柱</span></button>
+      <button type="button" class="prim-tile" data-prim="cone"        title="添加圆锥">    <span class="prim-tile-icon">▲</span><span class="prim-tile-name">圆锥</span></button>
+      <button type="button" class="prim-tile" data-prim="prism"       title="添加棱柱">    <span class="prim-tile-icon">⬢</span><span class="prim-tile-name">棱柱</span></button>
+      <button type="button" class="prim-tile" data-prim="torus"       title="添加圆环">    <span class="prim-tile-icon">◯</span><span class="prim-tile-name">圆环</span></button>
+      <button type="button" class="prim-tile" data-prim="ellipsoid"   title="添加椭球">    <span class="prim-tile-icon">⬬</span><span class="prim-tile-name">椭球</span></button>
+      <button type="button" class="prim-tile" data-prim="frustum"     title="添加平台/截锥"><span class="prim-tile-icon">⏶</span><span class="prim-tile-name">平台</span></button>
+      <button type="button" class="prim-tile" data-prim="tetrahedron" title="添加四面体">  <span class="prim-tile-icon">▴</span><span class="prim-tile-name">四面体</span></button>
+      <button type="button" class="prim-tile" data-prim="octahedron"  title="添加八面体">  <span class="prim-tile-icon">◆</span><span class="prim-tile-name">八面体</span></button>
     </div>
 
     <div class="lib-category-label">进阶形状</div>
     <div class="prim-tiles">
-      <button type="button" class="prim-tile" data-prim="pyramid"    title="添加金字塔">    <span class="prim-tile-icon">△</span><span class="prim-tile-name">金字塔</span></button>
-      <button type="button" class="prim-tile" data-prim="hemisphere" title="添加半球">      <span class="prim-tile-icon">◐</span><span class="prim-tile-name">半球</span></button>
-      <button type="button" class="prim-tile" data-prim="tube"       title="添加管道">      <span class="prim-tile-icon">◎</span><span class="prim-tile-name">管道</span></button>
-      <button type="button" class="prim-tile" data-prim="capsule"    title="添加胶囊体">    <span class="prim-tile-icon">⬭</span><span class="prim-tile-name">胶囊</span></button>
-      <button type="button" class="prim-tile" data-prim="wedge"      title="添加楔形">      <span class="prim-tile-icon">◣</span><span class="prim-tile-name">楔形</span></button>
-      <button type="button" class="prim-tile" data-prim="star"       title="添加星形">      <span class="prim-tile-icon">★</span><span class="prim-tile-name">星形</span></button>
-      <button type="button" class="prim-tile" data-prim="bowl"       title="添加碗形">      <span class="prim-tile-icon">◡</span><span class="prim-tile-name">碗</span></button>
-      <button type="button" class="prim-tile" data-prim="disc"       title="添加圆盘">      <span class="prim-tile-icon">◉</span><span class="prim-tile-name">圆盘</span></button>
+      <button type="button" class="prim-tile" data-prim="pyramid"    title="添加金字塔">  <span class="prim-tile-icon">△</span><span class="prim-tile-name">金字塔</span></button>
+      <button type="button" class="prim-tile" data-prim="hemisphere" title="添加半球">    <span class="prim-tile-icon">◐</span><span class="prim-tile-name">半球</span></button>
+      <button type="button" class="prim-tile" data-prim="tube"       title="添加管道">    <span class="prim-tile-icon">◎</span><span class="prim-tile-name">管道</span></button>
+      <button type="button" class="prim-tile" data-prim="capsule"    title="添加胶囊体">  <span class="prim-tile-icon">⬭</span><span class="prim-tile-name">胶囊</span></button>
+      <button type="button" class="prim-tile" data-prim="wedge"      title="添加楔形">    <span class="prim-tile-icon">◣</span><span class="prim-tile-name">楔形</span></button>
+      <button type="button" class="prim-tile" data-prim="star"       title="添加星形">    <span class="prim-tile-icon">★</span><span class="prim-tile-name">星形</span></button>
+      <button type="button" class="prim-tile" data-prim="bowl"       title="添加碗形">    <span class="prim-tile-icon">◡</span><span class="prim-tile-name">碗</span></button>
+      <button type="button" class="prim-tile" data-prim="disc"       title="添加圆盘">    <span class="prim-tile-icon">◉</span><span class="prim-tile-name">圆盘</span></button>
+      <button type="button" class="prim-tile" data-prim="spring"     title="添加弹簧/螺旋"><span class="prim-tile-icon">෴</span><span class="prim-tile-name">弹簧</span></button>
+    </div>
+
+    <div class="lib-category-label">实用形状</div>
+    <div class="prim-tiles">
+      <button type="button" class="prim-tile" data-prim="lshape" title="添加L形">     <span class="prim-tile-icon">⌐</span><span class="prim-tile-name">L形</span></button>
+      <button type="button" class="prim-tile" data-prim="tshape" title="添加T形">     <span class="prim-tile-icon">⊤</span><span class="prim-tile-name">T形</span></button>
+      <button type="button" class="prim-tile" data-prim="cross"  title="添加十字形">  <span class="prim-tile-icon">✚</span><span class="prim-tile-name">十字</span></button>
+      <button type="button" class="prim-tile" data-prim="stairs" title="添加阶梯">    <span class="prim-tile-icon">⏚</span><span class="prim-tile-name">阶梯</span></button>
+      <button type="button" class="prim-tile" data-prim="nut"    title="添加六角螺母"><span class="prim-tile-icon">⬣</span><span class="prim-tile-name">螺母</span></button>
+      <button type="button" class="prim-tile" data-prim="arrow"  title="添加箭头">    <span class="prim-tile-icon">➤</span><span class="prim-tile-name">箭头</span></button>
+    </div>
+
+    <div class="lib-category-label">装饰形状</div>
+    <div class="prim-tiles">
+      <button type="button" class="prim-tile" data-prim="heart"    title="添加心形">  <span class="prim-tile-icon">♥</span><span class="prim-tile-name">心形</span></button>
+      <button type="button" class="prim-tile" data-prim="crescent" title="添加月牙形"><span class="prim-tile-icon">☾</span><span class="prim-tile-name">月牙</span></button>
     </div>
 
     <div class="lib-category-label">二维切片</div>
@@ -117,6 +201,15 @@
     <div class="action-row">
       <button type="button" id="clearCodeBtn" title="清空代码区">清空代码</button>
     </div>
+  </section>
+
+  <section class="panel-section" id="componentSection" hidden>
+    <h3>组件库 <span class="hint-text">选中物体后可"保存为组件"</span></h3>
+    <div class="component-tabs">
+      <button type="button" class="component-tab active" data-scope="project">项目组件</button>
+      <button type="button" class="component-tab" data-scope="session">临时组件</button>
+    </div>
+    <ul id="componentList" class="component-list"></ul>
   </section>
 
   <section class="panel-section" id="selectionPanel" hidden>
@@ -158,17 +251,16 @@
       </label>
     </div>
     <div class="action-row">
+      <button type="button" class="flip-btn" data-flip-axis="x" title="沿 YZ 平面翻转（再次点击可还原）">翻转 X</button>
+      <button type="button" class="flip-btn" data-flip-axis="y" title="沿 XZ 平面翻转（再次点击可还原）">翻转 Y</button>
+      <button type="button" class="flip-btn" data-flip-axis="z" title="沿 XY 平面翻转（再次点击可还原）">翻转 Z</button>
+    </div>
+    <div class="action-row">
       <button type="button" id="selApplyBtn" class="primary-btn">应用到代码</button>
       <button type="button" id="selDeleteBtn" title="从代码中删除">删除</button>
     </div>
-  </section>
-
-  <section class="panel-section">
-    <h3>操作</h3>
     <div class="action-row">
-      <button type="button" id="ast3dUndoBtn" disabled title="撤销 (Ctrl+Z)">撤销</button>
-      <button type="button" id="ast3dRedoBtn" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
-      <button type="button" id="resetCameraBtn" title="重置视角">重置视角</button>
+      <button type="button" id="saveAsComponentBtn" title="把当前选中物体保存为可复用组件">保存为组件</button>
     </div>
   </section>
 
@@ -202,7 +294,19 @@
   </div>
 </main>
 
+<!-- Welcome overlay removed from entry flow in v3. Kept in DOM for back-compat
+     of any code that still references the IDs, but display:none belt-and-suspenders. -->
+<div id="projectEmptyOverlay" hidden style="display:none !important;">
+  <div class="project-empty-card">
+    <h2>欢迎使用 OpenSCAD 编辑器</h2>
+    <p id="projectEmptyMsg">开始编辑前，请先创建或选择一个项目。</p>
+    <p class="project-empty-hint" id="projectEmptyHint">所有形状、组件、代码都将保存在该项目中。</p>
+    <button type="button" id="projectEmptyActionBtn" class="primary-btn">新建项目</button>
+  </div>
+</div>
+
 <script src="osped.js"></script>
+<script src="project.js"></script>
 <script type="module" src="three3d.js"></script>
 </body>
 </html>
